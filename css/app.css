@@ -1,0 +1,408 @@
+/* ===========================================================
+   設計 Token
+   就像 Illustrator 的「色票 + 字級表」：顏色和尺寸先定義成變數，
+   之後要改整體風格，只要改這一區，所有用到的地方會一起變。
+   =========================================================== */
+:root{
+  /* 底色系統 —— 沿用台南版的暖米白，不是純灰 */
+  --ground:#F7F6F2;        /* 最底層背景 */
+  --surface:#FFFFFF;       /* 卡片、面板 */
+  --surface-2:#F9F8F5;     /* 次級面板：輸入列、備案行程 */
+  --line:#E5E3DC;          /* 分隔線 */
+
+  /* 文字三階 */
+  --ink:#1A1916;           /* 主要文字（墨黑） */
+  --ink-2:#7A7870;         /* 次要文字 */
+  --ink-3:#A8A69E;         /* 最淡：標籤、時間戳 */
+
+  /* 功能色 */
+  --accent:#1A1916;        /* 介面主色：主按鈕、送出鍵 */
+  --accent-ink:#FFFFFF;
+  --accent-soft:#EDEBE5;
+  --ok:#1D9E75;            /* 已訂位 */
+  --ok-soft:#DCFCE7;
+  --warn:#B45309;          /* 備案、提醒 */
+  --warn-soft:#FEF3C7;
+  --danger:#DC2626;
+  --danger-soft:#FEE2E2;
+  --link:#1a73e8;
+
+  --shadow:0 1px 2px rgba(26,25,22,.06), 0 8px 24px rgba(26,25,22,.08);
+  --r-sm:8px; --r-md:12px; --r-lg:20px;
+  --tab-h:60px;
+}
+
+/* 深色模式：只換 token，元件樣式完全不用重寫。
+   兩個區塊都要寫 —— 一個給「跟隨系統」，一個給「手動切成深色」 */
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#14130F; --surface:#1E1D19; --surface-2:#272620;
+    --line:#34322B; --ink:#F2F0EA; --ink-2:#A9A69C; --ink-3:#7B7970;
+    --accent:#F2F0EA; --accent-ink:#1A1916; --accent-soft:#2E2C25;
+    --ok:#4FBF95; --ok-soft:#1C3A2E;
+    --warn:#E0A75E; --warn-soft:#3A2E1A;
+    --danger:#F07070; --danger-soft:#3A1F1F;
+    --link:#7FB0F0;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#14130F; --surface:#1E1D19; --surface-2:#272620;
+  --line:#34322B; --ink:#F2F0EA; --ink-2:#A9A69C; --ink-3:#7B7970;
+  --accent:#F2F0EA; --accent-ink:#1A1916; --accent-soft:#2E2C25;
+  --ok:#4FBF95; --ok-soft:#1C3A2E;
+  --warn:#E0A75E; --warn-soft:#3A2E1A;
+  --danger:#F07070; --danger-soft:#3A1F1F;
+  --link:#7FB0F0;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+}
+
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+/* 手機上絕不允許橫向捲動 —— 版面被推出去的頭號原因 */
+html,body{max-width:100%; overflow-x:hidden; overscroll-behavior:none}
+body{
+  margin:0; min-height:100dvh;
+  background:var(--ground); color:var(--ink);
+  font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",-apple-system,sans-serif;
+  font-size:15px; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  display:flex; align-items:center; justify-content:center;
+}
+
+/* 手機外殼：手機滿版；桌機縮成一支手機，方便一邊做一邊看效果 */
+.app{
+  width:100%; max-width:100%;
+  height:100vh; height:100dvh;
+  background:var(--surface);
+  display:flex; flex-direction:column;
+  overflow:hidden; position:relative;
+}
+@media (min-width:520px){
+  .app{
+    max-width:430px;
+    height:min(100dvh - 40px, 900px);
+    border-radius:30px; box-shadow:var(--shadow); border:1px solid var(--line);
+  }
+}
+
+/* --- 上方標題列 --- */
+.bar{
+  flex:0 0 auto; display:flex; align-items:center; gap:8px;
+  padding:calc(12px + env(safe-area-inset-top)) 12px 12px;
+  border-bottom:1px solid var(--line); background:var(--surface); z-index:3;
+}
+.bar h1{
+  margin:0; font-size:17px; font-weight:700; letter-spacing:.01em;
+  flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.bar .sub{font-size:11px; color:var(--ink-3); font-weight:400; margin-left:6px}
+.icon-btn{
+  border:none; background:transparent; color:var(--ink-2);
+  width:34px; height:34px; border-radius:50%; flex:0 0 auto;
+  display:grid; place-items:center; cursor:pointer; font-size:16px;
+  font-family:inherit;
+}
+.icon-btn:hover{background:var(--surface-2); color:var(--ink)}
+:focus-visible{outline:2px solid var(--ok); outline-offset:2px}
+
+/* --- 中間可捲動區 --- */
+.screen{
+  flex:1 1 auto; overflow-y:auto; overflow-x:hidden;
+  overscroll-behavior:contain; -webkit-overflow-scrolling:touch;
+  background:var(--ground);
+}
+.screen[hidden]{display:none}
+
+/* ===========================================================
+   旅程列表（首頁）
+   =========================================================== */
+.trips{padding:16px 14px calc(20px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:12px}
+.trip-card{
+  display:flex; align-items:stretch; gap:0; text-align:left;
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--r-md);
+  overflow:hidden; cursor:pointer; font:inherit; color:inherit; padding:0;
+  transition:transform .12s ease, box-shadow .12s ease;
+}
+.trip-card:hover{transform:translateY(-1px); box-shadow:var(--shadow)}
+/* 左側封面色塊：旅程的識別色 */
+.trip-cover{
+  flex:0 0 76px; background:var(--c); color:var(--c-ink);
+  display:grid; place-items:center; font-size:30px; line-height:1;
+}
+.trip-info{flex:1; min-width:0; padding:13px 14px}
+.trip-info .name{font-size:16px; font-weight:700; word-break:break-word}
+.trip-info .when{font-size:12px; color:var(--ink-2); margin-top:3px}
+.trip-info .stat{font-size:11px; color:var(--ink-3); margin-top:5px; display:flex; gap:10px; flex-wrap:wrap}
+.trip-edit{
+  flex:0 0 auto; align-self:flex-start; border:none; background:transparent;
+  color:var(--ink-3); cursor:pointer; font-size:14px; padding:12px 10px;
+}
+.trip-edit:hover{color:var(--ink)}
+
+/* 空狀態 */
+.empty{color:var(--ink-3); font-size:13.5px; text-align:center; padding:40px 20px; line-height:2}
+.empty strong{color:var(--ink-2)}
+.empty code{
+  font-family:ui-monospace,"SFMono-Regular",Menlo,monospace; background:var(--surface);
+  padding:2px 6px; border-radius:6px; color:var(--ink-2); font-size:12px;
+}
+
+/* 新增旅程按鈕 */
+.add-trip{
+  border:1px dashed var(--line); background:transparent; color:var(--ink-2);
+  font:inherit; font-size:14px; padding:16px; border-radius:var(--r-md); cursor:pointer;
+}
+.add-trip:hover{border-color:var(--ok); color:var(--ok)}
+
+/* ===========================================================
+   行程頁
+   =========================================================== */
+/* 天數 tabs */
+.daytabs{
+  display:flex; gap:7px; padding:11px 14px; overflow-x:auto; scrollbar-width:none;
+  background:var(--surface); border-bottom:1px solid var(--line);
+}
+.daytabs::-webkit-scrollbar{display:none}
+.daytab{
+  flex-shrink:0; padding:6px 14px; border-radius:20px;
+  border:1.5px solid var(--line); background:var(--surface);
+  font:inherit; font-size:13px; font-weight:500; cursor:pointer; color:var(--ink-2);
+  transition:all .15s;
+}
+.daytab[aria-selected="true"]{color:var(--c-ink); background:var(--c); border-color:transparent}
+
+/* 當天的標頭 */
+.day-head{
+  padding:12px 14px; color:var(--c-ink); background:var(--c);
+  display:flex; align-items:center; gap:9px; flex-wrap:wrap;
+}
+.day-badge{font-size:12px; font-weight:600; background:rgba(255,255,255,.22); padding:2px 10px; border-radius:20px}
+.day-title{font-size:13px; font-weight:600; flex:1; min-width:0}
+.day-date{font-size:11px; opacity:.85}
+.day-route{
+  border:1px solid rgba(255,255,255,.45); background:rgba(255,255,255,.16);
+  color:inherit; font:inherit; font-size:11.5px; padding:3px 10px;
+  border-radius:999px; cursor:pointer; flex:0 0 auto;
+}
+.day-route:hover{background:rgba(255,255,255,.3)}
+
+/* 景點清單 */
+.stops{background:var(--surface); list-style:none; margin:0; padding:0}
+.stop{
+  display:flex; border-top:1px solid var(--line); position:relative;
+  background:var(--surface);
+  /* 拖曳中要禁止瀏覽器自己捲動，否則手機會邊拖邊捲 */
+  touch-action:pan-y;
+}
+.stop:first-child{border-top:none}
+.stop.alt-stop{background:var(--surface-2)}
+/* 左側色條：用形狀而不是外框，表示「這是一筆行程」 */
+.stop::before{content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--c)}
+.stop.dragging{opacity:.45; box-shadow:var(--shadow); z-index:5}
+/* 拖曳時顯示「會插在這裡」的那條線 */
+.stop.drag-over{box-shadow:inset 0 2px 0 var(--ok)}
+.stop.drag-over-end{box-shadow:inset 0 -2px 0 var(--ok)}
+.stop-grip{
+  flex:0 0 22px; display:grid; place-items:center; color:var(--ink-3);
+  cursor:grab; font-size:13px; user-select:none; touch-action:none;
+}
+.stop-grip:active{cursor:grabbing}
+.stop-time{
+  min-width:52px; flex:0 0 auto; padding:13px 4px 12px 2px;
+  font-size:10.5px; color:var(--ink-2); line-height:1.45;
+  font-variant-numeric:tabular-nums;
+}
+.stop-body{padding:11px 6px 11px 4px; flex:1; min-width:0}
+.stop-name{font-weight:600; font-size:13.5px; margin-bottom:3px; display:flex; align-items:center; gap:6px; flex-wrap:wrap}
+.stop-name .txt{word-break:break-word}
+.pill{font-size:10px; padding:1px 7px; border-radius:10px; font-weight:500; flex-shrink:0}
+.pill-booked{background:var(--ok-soft); color:var(--ok)}
+.pill-alt{background:var(--warn-soft); color:var(--warn)}
+.stop-note{font-size:11.5px; color:var(--ink-2); line-height:1.65; word-break:break-word}
+.map-link{
+  font-size:10.5px; display:inline-flex; align-items:center; gap:3px;
+  color:var(--link); text-decoration:none; margin-top:4px;
+}
+.map-link:hover{text-decoration:underline}
+.stop-edit{
+  flex:0 0 auto; border:none; background:transparent; color:var(--ink-3);
+  cursor:pointer; font-size:13px; padding:11px 10px; align-self:flex-start;
+}
+.stop-edit:hover{color:var(--ink)}
+
+.day-foot{display:flex; gap:8px; padding:12px 14px calc(28px + env(safe-area-inset-bottom)); flex-wrap:wrap; background:var(--ground)}
+.ghost-btn{
+  border:1px solid var(--line); background:var(--surface); color:var(--ink-2);
+  font:inherit; font-size:12.5px; padding:8px 14px; border-radius:999px; cursor:pointer;
+}
+.ghost-btn:hover{border-color:var(--ink-3); color:var(--ink)}
+.ghost-btn.danger:hover{border-color:var(--danger); color:var(--danger)}
+
+/* ===========================================================
+   新增分頁（對話式）
+   =========================================================== */
+.chat{display:flex; flex-direction:column; gap:14px; padding:18px 12px 8px; min-height:100%; background:var(--ground)}
+.msg{display:flex; gap:8px; max-width:88%}
+.msg.me{align-self:flex-end; flex-direction:row-reverse}
+.avatar{flex:0 0 32px; width:32px; height:32px; border-radius:11px; display:grid; place-items:center; font-size:15px}
+.msg .col{min-width:0}
+.msg .who{font-size:11px; color:var(--ink-3); margin:0 4px 3px}
+.msg.me .who{display:none}
+.bubble{
+  background:var(--surface); padding:9px 13px; border-radius:4px 16px 16px 16px;
+  word-break:break-word; white-space:pre-wrap; font-size:14.5px; border:1px solid var(--line);
+}
+.msg.me .bubble{border-radius:16px 4px 16px 16px; background:var(--accent); color:var(--accent-ink); border-color:transparent}
+
+/* 解析結果確認卡 */
+.card{
+  background:var(--surface); border:1px solid var(--line);
+  border-radius:4px 16px 16px 16px; padding:13px 14px; min-width:220px; width:100%;
+}
+.card .ok{font-size:11.5px; letter-spacing:.05em; color:var(--ink-3); margin-bottom:10px}
+.card .items{display:flex; flex-direction:column; gap:8px; margin-bottom:12px}
+.pick{
+  display:flex; gap:9px; align-items:flex-start; background:var(--surface-2);
+  border:1px solid transparent; border-radius:var(--r-sm); padding:9px 10px; cursor:pointer;
+}
+.pick[data-on="0"]{opacity:.42}
+.pick input{margin:3px 0 0; width:16px; height:16px; flex:0 0 auto; accent-color:var(--ok)}
+.pick .pk-body{flex:1; min-width:0}
+.pick .pk-top{display:flex; align-items:baseline; gap:7px; flex-wrap:wrap}
+.pick .pk-time{font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums}
+.pick .pk-name{font-size:14px; font-weight:600; word-break:break-word}
+.pick .pk-note{font-size:11px; color:var(--ink-3); margin-top:3px; line-height:1.5; word-break:break-word}
+.pick .pk-edit{border:none; background:transparent; color:var(--ink-3); cursor:pointer; font-size:12px; padding:2px 4px}
+.card .where{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px; font-size:12.5px; color:var(--ink-2)}
+.card select{
+  border:1px solid var(--line); background:var(--surface); color:var(--ink);
+  font:inherit; font-size:13px; padding:6px 9px; border-radius:var(--r-sm); max-width:100%;
+}
+.card .go{
+  width:100%; border:none; background:var(--accent); color:var(--accent-ink);
+  font:inherit; font-weight:600; font-size:14px; padding:11px; border-radius:var(--r-sm); cursor:pointer;
+}
+.card .go:disabled{opacity:.4; cursor:default}
+
+/* 輸入區 */
+.composer{
+  flex:0 0 auto; border-top:1px solid var(--line); background:var(--surface);
+  padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+}
+.composer[hidden]{display:none}
+/* 快捷提示：折行排列，不用橫向捲動（橫向捲動的手勢會把整頁帶著跑） */
+.chips{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:9px}
+.chip{
+  border:1px solid var(--line); background:var(--surface-2); color:var(--ink-2);
+  font:inherit; font-size:12px; padding:5px 11px; border-radius:999px; cursor:pointer;
+}
+.chip:hover{border-color:var(--ok); color:var(--ok)}
+.input-row{display:flex; gap:8px; align-items:flex-end}
+.input-row textarea{
+  flex:1; min-width:0; border:1px solid var(--line); background:var(--surface-2);
+  color:var(--ink); font:inherit; line-height:1.5;
+  /* 16px 是 iOS 的底線：小於 16px 的輸入框被點到時，Safari 會自動放大整頁，
+     畫面就會比螢幕寬、右邊全被推出去。務必不要調小。 */
+  font-size:16px;
+  padding:10px 14px; border-radius:20px; resize:none; max-height:130px;
+  overflow-y:auto; overscroll-behavior:contain;
+}
+.input-row textarea::placeholder{color:var(--ink-3)}
+.send{
+  flex:0 0 auto; width:42px; height:42px; border-radius:50%; border:none;
+  background:var(--accent); color:var(--accent-ink); cursor:pointer; font-size:16px;
+  display:grid; place-items:center;
+}
+.send:disabled{opacity:.35; cursor:default}
+
+/* ===========================================================
+   底部分頁列
+   =========================================================== */
+.tabs{
+  flex:0 0 auto; display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
+  border-top:1px solid var(--line); background:var(--surface);
+  padding-bottom:env(safe-area-inset-bottom);
+}
+.tabs[hidden]{display:none}
+.tab{
+  border:none; background:transparent; cursor:pointer; height:var(--tab-h);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+  color:var(--ink-3); font:inherit; font-size:11px; letter-spacing:.05em;
+}
+.tab .ico{font-size:18px; line-height:1}
+.tab[aria-selected="true"]{color:var(--ink)}
+
+/* ===========================================================
+   底部彈出面板（表單、設定）
+   =========================================================== */
+.sheet-bg{position:absolute; inset:0; background:rgba(20,19,15,.5); display:flex; align-items:flex-end; z-index:10}
+.sheet{
+  background:var(--surface); width:100%; max-height:90%; overflow-y:auto;
+  overscroll-behavior:contain; border-radius:var(--r-lg) var(--r-lg) 0 0;
+  padding:20px 18px calc(24px + env(safe-area-inset-bottom));
+  animation:up .22s ease;
+}
+@keyframes up{from{transform:translateY(14px);opacity:.4}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.sheet{animation:none}}
+.sheet h2{font-size:18px; font-weight:700; margin:0 0 4px}
+.sheet h3{font-size:11px; letter-spacing:.12em; color:var(--ink-3); margin:20px 0 8px; font-weight:600}
+.sheet p{margin:0 0 10px; color:var(--ink-2); font-size:13px; line-height:1.75}
+.sheet .note{font-size:11.5px; color:var(--ink-3); margin:6px 0 0}
+.sheet ul{margin:0; padding-left:17px; color:var(--ink-2); font-size:13px}
+.sheet li{margin-bottom:6px}
+.sheet code{font-family:ui-monospace,"SFMono-Regular",Menlo,monospace; font-size:12px; background:var(--surface-2); padding:2px 6px; border-radius:6px; color:var(--ink)}
+
+.field{margin-bottom:12px}
+.field label{display:block; font-size:11px; font-weight:600; color:var(--ink-3); margin-bottom:5px; letter-spacing:.06em}
+.field input, .field textarea, .field select{
+  width:100%; border:1px solid var(--line); background:var(--surface-2); color:var(--ink);
+  font:inherit; font-size:16px;        /* 同上：不得小於 16px，否則 iOS 會放大整頁 */
+  padding:10px 12px; border-radius:var(--r-sm); outline:none;
+}
+.field input:focus, .field textarea:focus, .field select:focus{border-color:var(--ok)}
+.field textarea{min-height:88px; resize:vertical; line-height:1.6}
+.field textarea.tall{min-height:150px; font-family:ui-monospace,"SFMono-Regular",Menlo,monospace; font-size:16px}
+.row{display:flex; gap:10px}
+.row .field{flex:1; min-width:0}
+.check-row{display:flex; gap:16px; flex-wrap:wrap}
+.check{display:flex; align-items:center; gap:6px; font-size:14px; cursor:pointer; color:var(--ink)}
+.check input{width:auto; accent-color:var(--ok)}
+
+/* 色票 */
+.swatches{display:flex; flex-wrap:wrap; gap:10px}
+.sw{width:32px; height:32px; border-radius:50%; border:none; cursor:pointer; background:var(--c); padding:0; position:relative}
+.sw[aria-pressed="true"]{box-shadow:0 0 0 2px var(--surface), 0 0 0 4px var(--c)}
+.sw[aria-pressed="true"]::after{content:"✓"; color:#fff; font-size:14px; position:absolute; inset:0; display:grid; place-items:center; text-shadow:0 1px 2px rgba(0,0,0,.4)}
+/* emoji 選擇 */
+.emojis{display:flex; flex-wrap:wrap; gap:6px}
+.emoji-btn{
+  width:38px; height:38px; border-radius:var(--r-sm); border:1px solid var(--line);
+  background:var(--surface-2); font-size:19px; cursor:pointer; line-height:1;
+}
+.emoji-btn[aria-pressed="true"]{border-color:var(--ink); background:var(--surface)}
+
+.sheet-actions{display:flex; gap:9px; margin-top:20px}
+.btn{
+  flex:1; padding:12px; border-radius:var(--r-md); border:none;
+  font:inherit; font-size:15px; font-weight:600; cursor:pointer;
+}
+.btn-primary{background:var(--accent); color:var(--accent-ink)}
+.btn-secondary{background:var(--surface-2); color:var(--ink); border:1px solid var(--line)}
+.btn-danger{background:var(--danger-soft); color:var(--danger); flex:0 0 auto; padding:12px 18px}
+.seg-theme{display:flex; gap:6px}
+.seg-theme button{
+  flex:1; border:1px solid var(--line); background:var(--surface-2); color:var(--ink-2);
+  font:inherit; font-size:13px; padding:9px; border-radius:var(--r-sm); cursor:pointer;
+}
+.seg-theme button[aria-pressed="true"]{background:var(--surface); color:var(--ink); border-color:var(--ink-3); font-weight:600}
+
+/* Toast */
+.toast{
+  position:absolute; bottom:calc(var(--tab-h) + 16px); left:50%;
+  transform:translateX(-50%) translateY(12px);
+  background:var(--ink); color:var(--ground);
+  padding:9px 18px; border-radius:999px; font-size:13px;
+  opacity:0; transition:all .2s; pointer-events:none; z-index:30;
+  max-width:88%; text-align:center;
+}
+.toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
