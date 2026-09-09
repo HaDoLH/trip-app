@@ -42,6 +42,9 @@
   <div class="composer" id="composer" hidden>
     <div class="chips" id="chips"></div>
     <div class="input-row">
+      <!-- 圖片入口：手機會跳出「相機 / 相簿」選單 -->
+      <button class="icon-round" id="btnPic" aria-label="加入截圖">🖼</button>
+      <input type="file" id="filePic" accept="image/*" hidden>
       <textarea id="msgInput" rows="1" placeholder="貼上店名、地址、營業時間…可以一次貼好幾家"></textarea>
       <button class="send" id="btnSend" aria-label="解析">➤</button>
     </div>

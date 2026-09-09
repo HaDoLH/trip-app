@@ -20,7 +20,9 @@ const view = {
   tripId: null,
   dayId: null,
   chat: [],            // 新增分頁的對話訊息
-  pending: null        // 等待確認的解析結果
+  pending: null,       // 等待確認的解析結果
+  shots: [],           // 暫存的截圖網址（重整就消失，不會存進硬碟）
+  guideOS: null        // 取字步驟目前顯示哪個系統
 };
 
 /* ---------- 小提示 ---------- */
@@ -235,27 +237,111 @@ function renderChat() {
   if (!view.chat.length) {
     box.innerHTML = `
       <div class="empty">
-        把找到的資料貼進下面的輸入框，我會幫你拆成一筆一筆的行程。<br><br>
+        把找到的資料貼進下面的輸入框，會自動拆成一筆一筆的行程。<br><br>
         <strong>可以貼什麼：</strong><br>
         IG 貼文、部落格片段、Google Maps 分享的文字<br>
         店名、地址、營業時間、電話都認得<br><br>
-        <strong>截圖怎麼辦？</strong><br>
-        丟給 Claude Code 說「加行程」，<br>把它給你的資料從 ☰ →「匯入資料」貼進來。
+        <strong>有截圖？</strong><br>
+        按左邊的 🖼 選一張，會教你怎麼把圖上的字抓下來。
       </div>`;
     return;
   }
 
   box.innerHTML = view.chat.map(m => {
     if (m.role === 'me') {
-      return `<div class="msg me"><div class="col"><div class="bubble">${esc(m.text)}</div></div></div>`;
+      const inner = m.image
+        ? `<div class="shot-wrap"><img class="shot" src="${m.image}" alt="你加入的截圖"></div>`
+        : `<div class="bubble">${esc(m.text)}</div>`;
+      return `<div class="msg me"><div class="col" style="flex:1">${inner}</div></div>`;
     }
-    const body = m.card ? renderCard(m) : `<div class="bubble">${esc(m.text)}</div>`;
+    const body = m.guide ? renderGuide() : (m.card ? renderCard(m) : `<div class="bubble">${esc(m.text)}</div>`);
     return `<div class="msg">
         <div class="avatar" style="background:var(--surface-2)">🧭</div>
         <div class="col" style="flex:1">${body}</div>
       </div>`;
   }).join('');
   requestAnimationFrame(() => { $('#scAdd').scrollTop = $('#scAdd').scrollHeight; });
+}
+
+/* ---------- 截圖取字 ----------
+   這個 App 是純靜態網頁，裡面沒有 AI，沒辦法自己「看懂」圖片。
+   但手機的作業系統本身就會認字：iPhone 的「實況文字」、Android 的 Google 鏡頭，
+   而且對「網頁裡顯示的圖片」一樣有效。
+   所以做法是：把截圖放大顯示在這裡，你在圖上長按取字，再按一下貼上就好。 */
+
+/** 認一下是什麼裝置，好把對應的步驟排在最前面 */
+function detectOS() {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios';
+  if (/Android/.test(ua)) return 'android';
+  return 'desktop';
+}
+
+const GUIDE_STEPS = {
+  ios: [
+    '在上面那張圖上<strong>長按</strong>（或按圖片右下角冒出的取字小圖示）',
+    '選<strong>「拷貝文字」</strong>；只要部分內容的話先拖曳選取範圍',
+    '回來按下面的<strong>「貼上並解析」</strong>'
+  ],
+  android: [
+    '截圖後在通知列選 <strong>Google 鏡頭</strong>，或到相簿按<strong>鏡頭圖示</strong>',
+    '框選文字後選<strong>「複製文字」</strong>',
+    '回來按下面的<strong>「貼上並解析」</strong>'
+  ],
+  desktop: [
+    '電腦的瀏覽器沒有內建取字功能',
+    '把這張截圖<strong>丟給 Claude Code</strong> 說「加行程」',
+    '複製它給的資料，從 <strong>☰ →「匯入資料」</strong>貼進來'
+  ]
+};
+const OS_LABEL = { ios: 'iPhone', android: 'Android', desktop: '電腦' };
+
+function renderGuide() {
+  const os = view.guideOS || detectOS();
+  return `<div class="guide">
+    <h4>接下來，用手機把圖上的字抓下來</h4>
+    <div class="tabs-os">
+      ${['ios', 'android', 'desktop'].map(k =>
+        `<button type="button" data-os="${k}" aria-pressed="${k === os}">${OS_LABEL[k]}</button>`
+      ).join('')}
+    </div>
+    <ol>${GUIDE_STEPS[os].map(s => `<li>${s}</li>`).join('')}</ol>
+    ${os === 'desktop' ? '' : '<button class="paste" data-paste>📋 貼上並解析</button>'}
+    <p class="hint">截圖只是暫時顯示，不會被存起來（瀏覽器的儲存空間很小，存圖片一下就滿了）。</p>
+  </div>`;
+}
+
+/** 把選到的圖片放進對話裡 */
+function showImage(file) {
+  if (!file || !file.type.startsWith('image/')) { toast('請選擇圖片檔'); return; }
+  const trip = currentTrip();
+  if (!trip) { toast('請先進入一趟旅程'); return; }
+  const url = URL.createObjectURL(file);
+  view.shots.push(url);            // 記著，等一下要回收，不然記憶體會一直長
+  pushMsg({ role: 'me', image: url });
+  pushMsg({ role: 'bot', guide: true });
+}
+
+/** 讀剪貼簿 → 填進輸入框 → 直接解析 */
+async function pasteAndParse() {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (!text || !text.trim()) { toast('剪貼簿是空的，先在圖上取字'); return; }
+    $('#msgInput').value = text.trim();
+    autoGrow();
+    handleSend();
+  } catch (e) {
+    // Safari 會擋自動讀剪貼簿，或使用者按了不允許 —— 退回請他自己貼
+    const t = $('#msgInput');
+    t.focus();
+    toast('請直接在下面的輸入框長按貼上');
+  }
+}
+
+/** 對話清空時把圖片的暫存網址收回來 */
+function releaseShots() {
+  view.shots.forEach(u => { try { URL.revokeObjectURL(u); } catch (e) {} });
+  view.shots = [];
 }
 
 /** 解析結果的確認卡 —— 一定要你看過、勾過才寫進行程 */
@@ -675,6 +761,7 @@ function openTrip(tripId) {
   view.dayId = trip && trip.days[0] ? trip.days[0].id : null;
   view.chat = [];
   view.pending = null;
+  releaseShots();
   renderPlan();
   go('plan');
 }
@@ -744,6 +831,11 @@ $('#dayView').addEventListener('click', e => {
 
 // 確認卡上的操作
 $('#chatList').addEventListener('click', e => {
+  // 取字引導卡：切換系統、貼上解析
+  const os = e.target.closest('[data-os]');
+  if (os) { view.guideOS = os.getAttribute('data-os'); renderChat(); return; }
+  if (e.target.closest('[data-paste]')) { pasteAndParse(); return; }
+
   const fix = e.target.closest('[data-fix]');
   if (fix) {
     e.preventDefault();
@@ -772,6 +864,35 @@ const isTouch = window.matchMedia('(pointer: coarse)').matches;
 $('#msgInput').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey && !isTouch) { e.preventDefault(); handleSend(); }
 });
+/* --- 截圖的三種進入方式：按鈕選檔、直接貼上、桌機拖曳 --- */
+$('#btnPic').addEventListener('click', () => $('#filePic').click());
+$('#filePic').addEventListener('change', e => {
+  if (e.target.files && e.target.files[0]) showImage(e.target.files[0]);
+  e.target.value = '';       // 清掉才能連續選同一張圖
+});
+// 在輸入框直接貼上圖片（電腦剪下畫面、手機複製圖片都算）
+$('#msgInput').addEventListener('paste', e => {
+  const item = Array.from(e.clipboardData ? e.clipboardData.items : [])
+    .find(i => i.type.startsWith('image/'));
+  if (!item) return;         // 貼的是文字就照原本的行為
+  e.preventDefault();
+  showImage(item.getAsFile());
+});
+// 桌機把圖拖進對話區
+const chatBox = $('#scAdd');
+['dragenter', 'dragover'].forEach(ev => chatBox.addEventListener(ev, e => {
+  e.preventDefault(); $('#chatList').classList.add('drop-on');
+}));
+['dragleave', 'drop'].forEach(ev => chatBox.addEventListener(ev, e => {
+  if (ev === 'dragleave' && chatBox.contains(e.relatedTarget)) return;
+  $('#chatList').classList.remove('drop-on');
+}));
+chatBox.addEventListener('drop', e => {
+  e.preventDefault();
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) showImage(f);
+});
+
 $('#chips').innerHTML = CHIPS.map(c => `<button type="button" class="chip">${esc(c)}</button>`).join('');
 $('#chips').addEventListener('click', e => {
   if (!e.target.classList.contains('chip')) return;
