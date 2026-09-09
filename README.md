@@ -29,7 +29,7 @@ trip-app/
 ├── index.html          # 骨架：手機外殼 + 三個畫面 + 底部分頁
 ├── css/app.css         # 設計 token + 全部樣式
 ├── js/
-│   ├── sample-data.js  # 範例資料（台南四日遊）
+│   ├── sample-data.js  # 示範資料（第一次打開時載入，可直接刪掉）
 │   ├── store.js        # 資料層：存讀檔、舊資料搬家、CRUD、匯出匯入
 │   ├── parser.js       # 文字解析引擎
 │   └── app.js          # 畫面渲染與事件

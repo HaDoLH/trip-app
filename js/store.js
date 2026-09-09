@@ -135,8 +135,8 @@ function migrateOldData(oldDays) {
     color: '#C05020',
     dateStart: dateMap[0],
     dateEnd: dateMap[3],
-    note: '兩人同行．騎車 ＋ 坐車',
-    stay: { name: '友愛街旅館', mapQuery: '台南市中西區友愛街115巷5號 友愛街旅館' },
+    note: '從舊版自動搬移',
+    stay: null,
     days: oldDays.map((d, i) => ({
       id: d.id || uid('day'),
       date: dateMap[i] || '',
