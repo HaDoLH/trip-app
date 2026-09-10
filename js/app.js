@@ -458,9 +458,32 @@ function swatchHtml(current) {
   ).join('') + `</div>`;
 }
 function emojiHtml(current) {
+  // 目前用的若不在預設清單裡，就是之前自己輸入的，顯示在自訂框裡
+  const custom = TRIP_EMOJIS.includes(current) ? '' : current;
   return `<div class="emojis" id="emojiPick">` + TRIP_EMOJIS.map(e =>
     `<button type="button" class="emoji-btn" data-e="${e}" aria-pressed="${e === current}">${e}</button>`
-  ).join('') + `</div>`;
+  ).join('') +
+  `<input type="text" class="emoji-custom" id="emojiCustom" value="${esc(custom)}"
+     placeholder="＋" aria-label="自己輸入 emoji" autocomplete="off" data-on="${custom ? 1 : 0}">` +
+  `</div>
+  <p class="note">沒有喜歡的？點最後的 ＋ 框，用鍵盤的 emoji 面板選任何一個（打一個字也可以，例如「京」）。</p>`;
+}
+
+/**
+ * 只留「第一個字」。
+ * 注意不能用 str[0] 或 str.slice(0,1)：很多 emoji 其實是好幾個碼拼起來的
+ * （例如 👨‍👩‍👧 是 5 個碼、國旗 🇯🇵 是 2 個），硬切會切成半個亂碼。
+ * Intl.Segmenter 會照「人眼看到的一個字」來切。
+ */
+function firstGrapheme(str) {
+  const s = String(str || '').trim();
+  if (!s) return '';
+  if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+    const seg = new Intl.Segmenter('zh-TW', { granularity: 'grapheme' });
+    const first = seg.segment(s)[Symbol.iterator]().next();
+    return first.done ? '' : first.value.segment;
+  }
+  return Array.from(s)[0] || '';   // 舊瀏覽器的退路：至少不會切到半個碼
 }
 /** 讓一組按鈕變成「單選」行為 */
 function bindPick(root, sel, attr, onPick) {
@@ -507,7 +530,21 @@ function openTripForm(tripId) {
     </div>
   `, root => {
     bindPick(root, '#colorPick', 'data-c', v => { color = v; });
-    bindPick(root, '#emojiPick', 'data-e', v => { emoji = v; });
+    const customBox = root.querySelector('#emojiCustom');
+    bindPick(root, '#emojiPick', 'data-e', v => {
+      emoji = v;
+      customBox.value = '';            // 點了預設的，就把自訂框清掉，避免兩個都像被選中
+      customBox.dataset.on = '0';
+    });
+    // 自己輸入：只留第一個字，並取消預設按鈕的選取狀態
+    customBox.addEventListener('input', () => {
+      const g = firstGrapheme(customBox.value);
+      customBox.value = g;
+      customBox.dataset.on = g ? '1' : '0';
+      if (!g) return;
+      emoji = g;
+      root.querySelectorAll('#emojiPick .emoji-btn').forEach(b => b.setAttribute('aria-pressed', 'false'));
+    });
     root.querySelector('[data-close]').onclick = closeSheet;
 
     root.querySelector('#tSave').onclick = () => {

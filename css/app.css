@@ -418,6 +418,17 @@ body{
   background:var(--surface-2); font-size:19px; cursor:pointer; line-height:1;
 }
 .emoji-btn[aria-pressed="true"]{border-color:var(--ink); background:var(--surface)}
+/* 自訂 emoji 框：跟預設按鈕同尺寸，用虛線表示「這格是空的，可以自己填」 */
+.emoji-custom{
+  width:38px; height:38px; border-radius:var(--r-sm); padding:0;
+  border:1px dashed var(--ink-3); background:var(--surface);
+  text-align:center; color:var(--ink);
+  font-size:19px;                     /* 大於 16px，iOS 點下去不會放大整頁 */
+  font-family:inherit; line-height:1; outline:none;
+}
+.emoji-custom::placeholder{color:var(--ink-3); font-size:16px}
+.emoji-custom:focus{border-style:solid; border-color:var(--ok)}
+.emoji-custom[data-on="1"]{border-style:solid; border-color:var(--ink)}
 
 .sheet-actions{display:flex; gap:9px; margin-top:20px}
 .btn{
