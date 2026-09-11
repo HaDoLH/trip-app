@@ -135,7 +135,8 @@ python -m http.server 8000
 
 1. **輸入框字級不得小於 16px** — 小於 16px 時 iOS Safari 一點就把整頁放大，版面會被推出螢幕外
 2. **Service Worker 路徑一律用相對路徑** — GitHub Pages 在子目錄 `/trip-app/` 下，寫 `/sw.js` 會 404
-3. **改版後要把 `sw.js` 的 `CACHE_NAME` 版本號 +1** — 否則手機一直用舊快取，看不到新功能
+3. **改版後要把 `sw.js` 的 `CACHE_NAME` 和 `app.js` 的 `APP_VERSION` 一起 +1** — 設定頁底部會顯示版本號，手機上看一眼就知道有沒有更新到
+3-1. **Service Worker 不要用「先看快取」（cache-first）** — v1～v3 就是這樣，結果新版部署好了，手機還是一直拿出舊檔。現在改成「先連網、沒網路才用快取」，安裝時抓檔也加 `cache:'reload'`，避開 GitHub Pages 讓瀏覽器暫存 10 分鐘的舊檔；新版接手時 App 會自動重新整理一次
 4. **拖曳握把要 `touch-action: none`** — 否則手機會邊拖邊捲動
 5. **`new Date('2026-04-24')` 會少一天** — 那被當成格林威治時間，台灣時區會退回前一天。要自己拆字串組（`fromYmd()` 就是為此而寫）
 

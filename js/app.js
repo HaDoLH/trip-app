@@ -9,6 +9,8 @@ const TYPE_ICONS = { food: '🍽', cafe: '☕', sight: '📍', shop: '🛍', hot
 const TYPE_NAMES = { food: '餐廳', cafe: '咖啡 / 飲料', sight: '景點', shop: '購物', hotel: '住宿', transit: '交通' };
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
+// 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
+const APP_VERSION = 'v4';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)
@@ -279,9 +281,9 @@ function detectOS() {
 
 const GUIDE_STEPS = {
   ios: [
-    '在上面那張圖上<strong>長按</strong>（或按圖片右下角冒出的取字小圖示）',
-    '選<strong>「拷貝文字」</strong>；只要部分內容的話先拖曳選取範圍',
-    '回來按下面的<strong>「貼上並解析」</strong>'
+    '<strong>點一下圖片</strong>放到全螢幕，在文字上<strong>長按</strong>，拖曳選取範圍',
+    '選<strong>「拷貝」</strong>，關掉大圖，按下面的<strong>「貼上並解析」</strong>',
+    '選不到字的話改用<strong>「照片」App</strong>：打開這張截圖 → 點右下角的<strong>取字圖示</strong>（方框裡三條線）→ 全選 → 拷貝 → 回來按「貼上並解析」'
   ],
   android: [
     '截圖後在通知列選 <strong>Google 鏡頭</strong>，或到相簿按<strong>鏡頭圖示</strong>',
@@ -338,6 +340,27 @@ async function pasteAndParse() {
   }
 }
 
+/**
+ * 全螢幕看圖。
+ * 在對話裡的圖被夾在可以捲動的區域中，手指一按常常變成「捲動」而不是「選字」。
+ * 放到全螢幕、圖以原本寬度顯示，長按選字就穩定得多，也可以兩指放大看小字。
+ */
+function openViewer(src) {
+  closeViewer();
+  const v = document.createElement('div');
+  v.className = 'viewer';
+  v.innerHTML = `
+    <button class="viewer-close" aria-label="關閉大圖">✕ 關閉</button>
+    <div class="viewer-scroll"><img src="${src}" alt="截圖大圖"></div>
+    <div class="viewer-tip">在文字上長按 → 拖曳選取 → 拷貝</div>`;
+  v.querySelector('.viewer-close').onclick = closeViewer;
+  $('.app').appendChild(v);
+}
+function closeViewer() {
+  const v = document.querySelector('.viewer');
+  if (v) v.remove();
+}
+
 /** 對話清空時把圖片的暫存網址收回來 */
 function releaseShots() {
   view.shots.forEach(u => { try { URL.revokeObjectURL(u); } catch (e) {} });
@@ -361,6 +384,7 @@ function renderCard(msg) {
             <span class="pk-top">
               <span class="pk-time">${esc(it.time)}</span>
               <span class="pk-name">${TYPE_ICONS[it.type] || '📍'} ${esc(it.name)}</span>
+              ${it._nameUnsure ? '<span class="pill pill-alt">店名待確認 ✎</span>' : ''}
               ${it.booked ? '<span class="pill pill-booked">已訂位</span>' : ''}
               ${it.alt ? '<span class="pill pill-alt">備案</span>' : ''}
             </span>
@@ -593,6 +617,9 @@ function openStopForm(opts) {
 
   openSheet(`
     <h2>${isNew ? '新增行程' : '編輯行程'}</h2>
+    ${(mode === 'pending' && s._raw) ? `
+      <div class="field"><label>取到的原文（對照用）</label>
+        <div class="raw-box">${esc(s._raw)}</div></div>` : ''}
     <div class="row">
       <div class="field"><label>時間</label><input type="text" id="sTime" value="${esc(s.time)}" placeholder="19:30 或 下午"></div>
       ${mode === 'db' ? `<div class="field"><label>哪一天</label><select id="sDay">
@@ -631,8 +658,8 @@ function openStopForm(opts) {
       };
 
       if (mode === 'pending') {
-        // 只改確認卡上的那一筆，還沒寫進行程
-        Object.assign(view.pending.items[index], data);
+        // 只改確認卡上的那一筆，還沒寫進行程；你親手改過，就不再標「待確認」
+        Object.assign(view.pending.items[index], data, { _nameUnsure: false });
         closeSheet();
         renderChat();
         return;
@@ -726,6 +753,7 @@ function openMenu() {
       <li>解析難免猜錯，加入前的確認卡上可以逐筆修改</li>
     </ul>
 
+    <p class="note" style="margin-top:18px; text-align:center">目前版本：${APP_VERSION}</p>
     <div class="sheet-actions"><button class="btn btn-primary" data-close>關閉</button></div>
   `, root => {
     root.querySelector('[data-close]').onclick = closeSheet;
@@ -868,6 +896,10 @@ $('#dayView').addEventListener('click', e => {
 
 // 確認卡上的操作
 $('#chatList').addEventListener('click', e => {
+  // 點截圖 → 全螢幕，比較好長按取字
+  const shot = e.target.closest('.shot');
+  if (shot) { openViewer(shot.getAttribute('src')); return; }
+
   // 取字引導卡：切換系統、貼上解析
   const os = e.target.closest('[data-os]');
   if (os) { view.guideOS = os.getAttribute('data-os'); renderChat(); return; }
@@ -947,7 +979,12 @@ $('#tabPlan').onclick = () => go('plan');
 $('#tabAdd').onclick = () => go('add');
 $('#btnBack').onclick = () => { renderTrips(); go('trips'); };
 $('#btnMenu').onclick = openMenu;
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  // 大圖疊在最上層，先關它；沒有大圖才關面板
+  if (document.querySelector('.viewer')) closeViewer();
+  else closeSheet();
+});
 
 /* ============================================================
    七、啟動
@@ -961,7 +998,26 @@ go('trips');
    路徑一定要用相對路徑 —— GitHub Pages 放在 /trip-app/ 子目錄下，
    寫成 '/sw.js' 會找不到檔案。 */
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  // 本來就有舊版在管這個頁面，才需要在換版時重新整理；第一次安裝不用
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+
+  // 新版 Service Worker 接手的那一刻，自動重新整理一次，畫面才會換成新版
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
+
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(err => console.log('SW 註冊失敗（本機開發時很正常）', err));
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+      .then(reg => {
+        // 手機上 App 常常只是「切到背景又切回來」而不是重開，
+        // 所以每次回到畫面時也主動問一次有沒有新版
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') reg.update().catch(() => {});
+        });
+      })
+      .catch(err => console.log('SW 註冊失敗（本機開發時很正常）', err));
   });
 }

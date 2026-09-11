@@ -15,14 +15,21 @@
 /* ---------- 各種樣式的辨識規則 ---------- */
 
 // 地址：抓「路/街/大道/巷/弄 + 數字 + 號」這個台灣門牌的骨架
-// 例：台南市中西區永和街69號、永福路二段35巷6號、忠義路二段158巷23號之1、民權路二段64巷56號3樓
-const RE_ADDRESS = /((?:[^\s，,。；;｜|、]{2,6}(?:市|縣))?(?:[^\s，,。；;｜|、]{1,5}(?:區|鄉|鎮|市))?[^\s，,。；;｜|、]{1,14}?(?:路|街|大道)(?:[一二三四五六七八九十]段)?(?:[^\s，,。；;｜|、]{0,10}?(?:巷|弄))?\s*\d+(?:\s*[-–之]\s*\d+)?\s*號(?:\s*之\s*\d+)?(?:\s*\d+\s*樓)?)/;
+// 例：台南市中西區永和街69號、永福路二段35巷6號、大學路西段53號、民權路二段64巷56號3樓
+const RE_ADDRESS = /((?:[^\s，,。；;｜|、]{2,6}(?:市|縣))?(?:[^\s，,。；;｜|、]{1,5}(?:區|鄉|鎮|市))?[^\s，,。；;｜|、]{1,14}?(?:路|街|大道)(?:[一二三四五六七八九十東西南北]段)?(?:[^\s，,。；;｜|、]{0,10}?(?:巷|弄))?\s*\d+(?:\s*[-–之]\s*\d+)?\s*號(?:\s*之\s*\d+)?(?:\s*\d+\s*樓)?)/;
+
+// 寬鬆地址：沒有門牌號，但有「縣市 + 區 + 路」，例如「台南市東區大學路西段」
+// 一定要有縣市和區，才不會把一般句子裡的「XX路」誤認成地址
+const RE_ADDRESS_LOOSE = /((?:[^\s，,。；;｜|、]{2,6}(?:市|縣))(?:[^\s，,。；;｜|、]{1,5}(?:區|鄉|鎮|市))[^\s，,。；;｜|、\d]{1,14}?(?:路|街|大道)(?:[一二三四五六七八九十東西南北]段)?)/;
+
+// 地址前面常黏著的符號：IG 的 📍 被取字後常變成 *
+const RE_LEAD_SYMBOL = /^(?:\s|\*|＊|📍|📌|•|・|※|>)+/;
 
 // 營業時間：時段區間（12:00–21:00、12–21:00、11:00-14:30）
 const RE_HOURS_RANGE = /(\d{1,2}(?::\d{2})?\s*[–\-~～至到]\s*\d{1,2}(?::\d{2})?)/g;
-// 營業時間：星期（週四–日、週一公休、每週二三公休）
-const RE_WEEKDAYS = /((?:每)?(?:週|周|星期|禮拜)\s*[一二三四五六日天]+(?:\s*[–\-~～至到]\s*(?:週|周|星期|禮拜)?\s*[一二三四五六日天]+)?(?:\s*(?:公休|店休|休))?)/g;
-const RE_CLOSED = /((?:公休|店休|不定期休|無公休)日?)/g;
+// 營業時間：星期（週四–日、週一公休、每週二三公休、週二定休）
+const RE_WEEKDAYS = /((?:每)?(?:週|周|星期|禮拜)\s*[一二三四五六日天]+(?:\s*[–\-~～至到]\s*(?:週|周|星期|禮拜)?\s*[一二三四五六日天]+)?(?:\s*(?:公休|店休|定休|休))?)/g;
+const RE_CLOSED = /((?:公休|店休|定休|不定期休|無公休)日?)/g;
 
 // 電話
 const RE_PHONE = /(0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{3,4}|09\d{2}[-\s]?\d{3}[-\s]?\d{3})/g;
@@ -38,6 +45,16 @@ const RE_LABELS = /(?:店名|名稱|地址|位置|地點|營業時間|時間|電
 // 「已訂位」「備案」這類狀態標記
 const RE_BOOKED = /(已訂位|已預約|已預訂|已訂|訂位完成)/;
 const RE_ALT = /(備案|替代方案|候補|plan\s*b|第二選擇)/i;
+
+/* ---------- 截圖取字常混進來的雜訊 ----------
+   IG、Google Maps 截圖用實況文字取字時，畫面上的按鈕和數字也會一起被抓下來。 */
+
+// IG 帳號（@ 前面要是行首或空白，才不會把 email 誤認成帳號）
+const RE_HANDLE = /(^|[\s(（])@([A-Za-z0-9._]{2,30})/g;
+// 追蹤數、貼文數：「10 則貼文」「1,667 位追蹤者」「2.3萬 粉絲」
+const RE_STATS = /[\d,.]+\s*(?:萬|千|[kKM])?\s*(?:則貼文|篇貼文|貼文|位追蹤者|追蹤者|人追蹤|追蹤中|位粉絲|粉絲|個讚|則評論|則評價|followers|following|posts)/gi;
+// 整行都是按鈕文字
+const RE_UI_LINE = /^(?:追蹤|追蹤中|已追蹤|發送訊息|訊息|聯絡|分享個人檔案|編輯個人檔案|查看翻譯|顯示更多|更多|路線|撥打電話|網站|儲存|分享|個人檔案|follow|following|message|contact)$/i;
 
 /* ---------- 類型判斷 ----------
    從店名和內文猜這是哪一種地點。愈前面的規則優先。 */
@@ -76,58 +93,151 @@ function normalizeTime(raw) {
 }
 
 /* ============================================================
-   一、把一大段文字切成「一筆一筆」
+   〇、先認出「每一行是什麼」
 
-   原理跟排版時看段落標記一樣：先找出哪裡是「新的一筆開始了」。
-   旅遊資料的分段訊號有三種：空行、行首時間、新的地址。
+   像排版前先幫每一段文字標上樣式：這行是標題、這行是地址、這行是內文。
+   標好之後，要判斷哪裡是「下一家」就容易多了。
    ============================================================ */
 
-/** 這一行看起來像不像「新一筆的開頭」 */
+/** 找地址：先用嚴格版（要有門牌號），找不到再用寬鬆版 */
+function findAddress(text) {
+  return text.match(RE_ADDRESS) || text.match(RE_ADDRESS_LOOSE);
+}
+
+/** 拿掉追蹤數、按鈕文字；整行都是雜訊就回傳空字串 */
+function cleanNoise(line) {
+  const t = String(line).replace(RE_STATS, ' ').replace(/\s{2,}/g, ' ').trim();
+  return RE_UI_LINE.test(t) ? '' : t;
+}
+
+/**
+ * 這一行是什麼？
+ *   noise         雜訊（追蹤數、按鈕）
+ *   handle        只有一個 IG 帳號
+ *   address       只有地址
+ *   named-address 同一行裡「店名 + 地址」
+ *   detail        營業時間、電話這類細節
+ *   text          其他文字（店名或描述）
+ */
+function lineKind(line) {
+  const t = cleanNoise(line);
+  if (!t) return 'noise';
+  if (/^@[A-Za-z0-9._]{2,30}$/.test(t)) return 'handle';
+
+  const am = findAddress(t);
+  if (am) {
+    const before = t.slice(0, am.index).replace(RE_LEAD_SYMBOL, '').trim();
+    return before ? 'named-address' : 'address';
+  }
+
+  // 把營業時間、電話都拿掉之後，幾乎不剩字的，就是細節行
+  const rest = t
+    .replace(RE_PHONE, '').replace(RE_WEEKDAYS, '').replace(RE_HOURS_RANGE, '').replace(RE_CLOSED, '')
+    .replace(/營業時間|營業|休息|時間|電話/g, '')
+    .replace(/[\s（）()｜|,，、:：~～\-–—]+/g, '');
+  return rest.length <= 1 ? 'detail' : 'text';
+}
+
+const isAddrKind = k => k === 'address' || k === 'named-address';
+
+/* ============================================================
+   一、把一大段文字切成「一筆一筆」
+   ============================================================ */
+
+/** 這一行看起來像不像「新一筆的開頭」（行首是時間或條列符號） */
 function looksLikeNewEntry(line) {
   const t = line.trim();
   if (!t) return false;
-  // 行首就是時間（19:30 xxx、下午3點 xxx）
   if (/^\s*(?:\d{1,2}\s*[:：點時]|(?:凌晨|清晨|早上|上午|中午|下午|傍晚|晚上|深夜)\s*\d)/.test(t)) return true;
-  // 行首是條列符號
   if (/^\s*(?:[-–—*+・‧•]|\d+[.)、])\s*\S/.test(t)) return true;
   return false;
 }
+
+/**
+ * 切一個區塊（沒有空行的一整段）。
+ *
+ * 以「地址」當錨點：每一家店都有一個地址，
+ * 地址往上數，最貼近它的那一行字就是這家的店名（中間夾的帳號、追蹤數一起帶走）。
+ * 這樣不管是「店名 地址」寫在同一行，還是 IG 那種「店名一行、地址一行」，都切得對。
+ */
+function splitBlock(lines) {
+  const kinds = lines.map(lineKind);
+  const addrIdx = kinds.map((k, i) => (isAddrKind(k) ? i : -1)).filter(i => i >= 0);
+  // 行首是時間或條列符號的也算新的一筆（但「* 地址」那種不算，那是 IG 的 📍）
+  const hard = lines.map((l, i) => (kinds[i] !== 'address' && looksLikeNewEntry(l) ? i : -1)).filter(i => i >= 0);
+
+  if (addrIdx.length <= 1 && hard.length <= 1) return [lines.join('\n')];
+
+  const starts = new Set(hard);
+  let prev = -1;                       // 上一個地址在第幾行，往回找不能越過它
+  for (const k of addrIdx) {
+    let s = k;
+    if (kinds[k] === 'address') {      // 地址自己一行 → 店名在上面
+      let j = k - 1;
+      const skip = () => { while (j > prev && (kinds[j] === 'noise' || kinds[j] === 'handle')) j--; };
+      skip();                          // 跳過夾在中間的追蹤數、帳號
+      if (j > prev && kinds[j] === 'text') {
+        s = j; j--;                    // 最貼近地址的一行字 = 店名（只拿一行，再上面的是上一家的描述）
+        while (j > prev && (kinds[j] === 'noise' || kinds[j] === 'handle')) { s = j; j--; }
+      } else {
+        s = j + 1;                     // 找不到店名：從帳號那行開始（沒帳號就是地址本身）
+      }
+    }
+    starts.add(s);
+    prev = k;
+  }
+
+  const sorted = [...starts].filter(i => i > 0).sort((a, b) => a - b);
+  const out = [];
+  let from = 0;
+  for (const s of sorted) {
+    if (s > from) { out.push(lines.slice(from, s).join('\n')); from = s; }
+  }
+  out.push(lines.slice(from).join('\n'));
+  return out;
+}
+
+/** 這一筆是不是「沒頭的」：一開頭就是地址或營業時間，缺店名 */
+function isHeadless(entry) {
+  for (const l of entry.split('\n')) {
+    const k = lineKind(l);
+    if (k === 'noise') continue;
+    return k === 'address' || k === 'detail';
+  }
+  return true;                         // 整筆都是雜訊
+}
+const entryHasAddress = entry => entry.split('\n').some(l => isAddrKind(lineKind(l)));
 
 /** 把使用者貼的一大段，切成一筆一筆的文字 */
 function splitEntries(raw) {
   const text = String(raw).replace(/\r\n?/g, '\n').trim();
   if (!text) return [];
 
-  // 第一刀：空行是最明確的分隔（一個店家一個區塊）
+  // 第一刀：空行
   const blocks = text.split(/\n\s*\n+/).map(b => b.trim()).filter(Boolean);
 
-  const entries = [];
+  // 第二刀：每個區塊裡再用地址當錨點切
+  const pieces = [];
   for (const block of blocks) {
     const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
-    if (lines.length <= 1) { entries.push(block); continue; }
-
-    // 第二刀：這個區塊裡，如果好幾行各自都像「獨立的一筆」，就一行一筆
-    const startCount = lines.filter(looksLikeNewEntry).length;
-    const addrCount = lines.filter(l => RE_ADDRESS.test(l)).length;
-
-    if (startCount >= 2 || addrCount >= 2) {
-      // 一行一筆；但「不像開頭又沒地址」的行，視為上一筆的補充說明
-      let current = '';
-      for (const line of lines) {
-        const isNew = looksLikeNewEntry(line) || RE_ADDRESS.test(line);
-        if (isNew && current) { entries.push(current); current = line; }
-        else if (isNew) { current = line; }
-        // 續行用換行接起來，不要用空白 —— 換行是「這裡本來是另一行」的證據，
-        // 等一下判斷店名到哪裡結束時要靠它
-        else { current = current ? current + '\n' + line : line; }
-      }
-      if (current) entries.push(current);
-    } else {
-      // 整塊就是一筆（例如店名一行、地址一行、營業時間一行）
-      entries.push(lines.join('\n'));
-    }
+    pieces.push(...splitBlock(lines));
   }
-  return entries;
+
+  // 第三步：縫回來。實況文字取字常在每一行之間都插空行，
+  // 會把「店名 / 追蹤數 / 地址」拆成三塊。沒頭的那塊要接回上一家。
+  const out = [];
+  for (const p of pieces) {
+    if (out.length && isHeadless(p)) {
+      const last = out.length - 1;
+      // 只有營業時間、雜訊 → 一定是上一家的；有地址 → 上一家還沒地址才接
+      if (!entryHasAddress(p) || !entryHasAddress(out[last])) {
+        out[last] = out[last] + '\n' + p;
+        continue;
+      }
+    }
+    out.push(p);
+  }
+  return out;
 }
 
 /* ============================================================
@@ -145,12 +255,21 @@ function tidy(str) {
 }
 
 /**
- * 解析一筆文字，回傳一個 stop 物件（外加 _raw 原文，方便你在確認卡上核對）
+ * 解析一筆文字，回傳一個 stop 物件
+ *   _raw：原文，確認卡上可以對照
+ *   _nameUnsure：店名是猜的（例如只抓到 IG 帳號），確認卡上會提醒你補
  * cityHint：例如 '台南'，用來補全沒有寫縣市的地址，Google Maps 才找得準
  */
 function parseEntry(raw, cityHint = '') {
   const original = String(raw).trim();
-  let work = original.replace(RE_LABELS, ' ');   // 先拆掉「店名：」「地址：」這類標籤
+
+  // --- 0. 先清雜訊：追蹤數、按鈕文字 ---
+  let work = original.split('\n').map(cleanNoise).filter(Boolean).join('\n');
+  work = work.replace(RE_LABELS, ' ');   // 拆掉「店名：」「地址：」這類標籤
+
+  // IG 帳號另外收起來：不當店名，放進備註
+  const handles = [];
+  work = work.replace(RE_HANDLE, (m, lead, h) => { handles.push(h); return lead; });
 
   // --- 1. 狀態標記 ---
   const booked = RE_BOOKED.test(work);
@@ -171,27 +290,30 @@ function parseEntry(raw, cityHint = '') {
     });
   });
 
+  // 前面拿掉東西後，開頭可能剩空行，先修齊
+  work = work.replace(/^[\s]+/, '');
+
   // --- 4. 到訪時間：只認「開頭」的那一個 ---
   //     寫在中間的數字多半是門牌或價格，不能當時間
   let time = '';
   const headClock = work.match(new RegExp('^\\s*' + RE_CLOCK.source));
   if (headClock) {
     time = normalizeTime(headClock[1]);
-    work = work.replace(headClock[0], ' ');
+    work = work.replace(headClock[0], ' ').replace(/^\s+/, '');
   } else {
     const headPeriod = work.match(new RegExp('^\\s*' + RE_PERIOD.source));
     if (headPeriod) {
       time = headPeriod[1];
-      work = work.replace(headPeriod[0], ' ');
+      work = work.replace(headPeriod[0], ' ').replace(/^\s+/, '');
     }
   }
 
   // --- 5. 地址（最重要的分界點：地址左邊是店名，右邊是備註）---
   let address = '';
   let namePart = '', tailPart = '';
-  const addrMatch = work.match(RE_ADDRESS);
+  const addrMatch = findAddress(work);
   if (addrMatch) {
-    address = addrMatch[1].trim().replace(/\s+/g, '');
+    address = addrMatch[1].replace(RE_LEAD_SYMBOL, '').replace(/\s+/g, '');
     namePart = work.slice(0, addrMatch.index);
     tailPart = work.slice(addrMatch.index + addrMatch[0].length);
   } else {
@@ -209,12 +331,18 @@ function parseEntry(raw, cityHint = '') {
   let name = tidy(namePart)
     .replace(RE_BOOKED, '')
     .replace(RE_ALT, '')
+    .replace(RE_LEAD_SYMBOL, '')
     .replace(/^\s*(?:[-–—*+・‧•]|\d+[.)、])\s*/, '')   // 條列符號
     .trim();
   if (name.length > 40) name = name.slice(0, 40);
 
-  // 店名被吃光時（例如整行只有地址），退而求其次用尾段或原文開頭
-  if (!name) name = tidy(tailPart).split(/\s+/)[0] || tidy(original).slice(0, 20);
+  // 找不到店名：有 IG 帳號就先拿帳號頂著，否則用原文開頭；兩種都標「待確認」
+  let nameUnsure = false;
+  if (!name) {
+    nameUnsure = true;
+    name = handles[0] || tidy(tailPart).split(/\s+/)[0] || tidy(original).slice(0, 20);
+    if (handles[0]) handles.shift();   // 已經拿去當店名了，備註就不再重複
+  }
 
   // --- 7. 其餘備註 ---
   //     狀態字、標籤字抽掉之後，常會留下孤零零的標點，一起清乾淨
@@ -229,15 +357,17 @@ function parseEntry(raw, cityHint = '') {
 
   // --- 8. 組 note：格式跟原本台南資料一致「地址｜營業時間｜備註」---
   const hours = hoursParts.join(' ').replace(/\s{2,}/g, ' ').trim();
-  const noteParts = [address, hours, extra, phones.join(' ')].map(tidy).filter(Boolean);
+  const handleNote = handles.map(h => '@' + h).join(' ');
+  const noteParts = [address, hours, extra, phones.join(' '), handleNote].map(tidy).filter(Boolean);
   const note = noteParts.join('｜');
 
   // --- 9. Google Maps 搜尋詞：地址 + 店名，命中率最高 ---
+  //     店名是猜的（例如帳號）就只用地址，帶著奇怪的字 Google 反而找不到
   let mapQuery = '';
   if (address) {
-    // 地址沒寫縣市的話補上，不然 Google 會找到別的縣市的同名路
-    const hasCity = /(市|縣)/.test(address.slice(0, 6));
-    mapQuery = ((hasCity ? '' : cityHint) + address + ' ' + name).trim();
+    const hasCity = /(市|縣)/.test(address.slice(0, 6));   // 沒寫縣市就補上，免得找到別縣市的同名路
+    const base = (hasCity ? '' : cityHint) + address;
+    mapQuery = (nameUnsure ? base : base + ' ' + name).trim();
   } else {
     mapQuery = ((cityHint ? cityHint + ' ' : '') + name).trim();
   }
@@ -251,7 +381,8 @@ function parseEntry(raw, cityHint = '') {
     booked,
     alt,
     _raw: original,
-    _address: address
+    _address: address,
+    _nameUnsure: nameUnsure
   };
 }
 
