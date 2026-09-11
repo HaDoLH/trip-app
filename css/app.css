@@ -58,6 +58,10 @@
 }
 
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+/* 標了 hidden 就一定要藏起來。
+   沒有這條的話，只要元件自己寫了 display:grid / flex（例如 .icon-btn），
+   就會把 hidden 蓋掉 —— 旅程列表頁的「‹ 返回」鍵就是這樣跑出來的 */
+[hidden]{display:none !important}
 /* 手機上絕不允許橫向捲動 —— 版面被推出去的頭號原因 */
 html,body{max-width:100%; overflow-x:hidden; overscroll-behavior:none}
 body{
