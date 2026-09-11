@@ -269,7 +269,7 @@ function parseEntry(raw, cityHint = '') {
 
   // IG 帳號另外收起來：不當店名，放進備註
   const handles = [];
-  work = work.replace(RE_HANDLE, (m, lead, h) => { handles.push(h); return lead; });
+  work = work.replace(RE_HANDLE, (_whole, lead, h) => { handles.push(h); return lead; });
 
   // --- 1. 狀態標記 ---
   const booked = RE_BOOKED.test(work);
@@ -280,15 +280,23 @@ function parseEntry(raw, cityHint = '') {
   phones.forEach(p => { work = work.replace(p, ' '); });
 
   // --- 3. 營業時間（要先抽走，否則 12:00–21:00 會被誤認成「到訪時間」）---
-  const hoursParts = [];
+  //     三種規則各找各的，但最後要照「原文出現的順序」排回去，
+  //     不然「週一 08:00-18:00（週二定休）」會變成「週一 週二定休 08:00-18:00」，意思就錯了
+  const spans = [];
   [RE_WEEKDAYS, RE_HOURS_RANGE, RE_CLOSED].forEach(re => {
     re.lastIndex = 0;
-    const found = work.match(re) || [];
-    found.forEach(h => {
-      hoursParts.push(h.trim());
-      work = work.replace(h, ' ');
-    });
+    let m;
+    while ((m = re.exec(work)) !== null) {
+      const start = m.index, end = m.index + m[0].length;
+      // 已經被別的規則抓過的範圍就跳過（例如「週一公休」的「公休」）
+      if (!spans.some(sp => start < sp.end && end > sp.start)) spans.push({ start, end, text: m[0].trim() });
+      if (m[0].length === 0) re.lastIndex++;
+    }
   });
+  spans.sort((a, b) => a.start - b.start);
+  const hoursParts = spans.map(sp => sp.text);
+  // 從後面往前挖掉，前面的位置才不會跑掉
+  [...spans].reverse().forEach(sp => { work = work.slice(0, sp.start) + ' ' + work.slice(sp.end); });
 
   // 前面拿掉東西後，開頭可能剩空行，先修齊
   work = work.replace(/^[\s]+/, '');
@@ -351,6 +359,7 @@ function parseEntry(raw, cityHint = '') {
       .replace(RE_BOOKED, '')
       .replace(RE_ALT, '')
       .replace(/(?:聯絡|訂位)?電話/g, ' ')
+      .replace(/[（(【\[]\s*[)）】\]]/g, ' ')          // 內容被抽走後剩下的空括號
       .replace(/\s*([，,、])\s*/g, '$1')
       .replace(/[，,、]{2,}/g, '，')
   );
