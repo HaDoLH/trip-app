@@ -346,8 +346,10 @@ function parseEntry(raw, cityHint = '') {
 
   // 找不到店名：有 IG 帳號就先拿帳號頂著，否則用原文開頭；兩種都標「待確認」
   let nameUnsure = false;
+  let nameHandle = '';                 // 店名是拿哪個 IG 帳號頂的，確認卡上可以一鍵打開那個帳號
   if (!name) {
     nameUnsure = true;
+    nameHandle = handles[0] || '';
     name = handles[0] || tidy(tailPart).split(/\s+/)[0] || tidy(original).slice(0, 20);
     if (handles[0]) handles.shift();   // 已經拿去當店名了，備註就不再重複
   }
@@ -391,7 +393,8 @@ function parseEntry(raw, cityHint = '') {
     alt,
     _raw: original,
     _address: address,
-    _nameUnsure: nameUnsure
+    _nameUnsure: nameUnsure,
+    _handle: nameHandle
   };
 }
 

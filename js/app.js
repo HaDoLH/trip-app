@@ -10,7 +10,7 @@ const TYPE_NAMES = { food: '餐廳', cafe: '咖啡 / 飲料', sight: '景點', s
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
 // 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
-const APP_VERSION = 'v4';
+const APP_VERSION = 'v5';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)
@@ -24,7 +24,9 @@ const view = {
   chat: [],            // 新增分頁的對話訊息
   pending: null,       // 等待確認的解析結果
   shots: [],           // 暫存的截圖網址（重整就消失，不會存進硬碟）
-  guideOS: null        // 取字步驟目前顯示哪個系統
+  guideOS: null,       // 取字步驟目前顯示哪個系統
+  lookupIndex: null,   // 按了「查店名」的是確認卡上第幾筆，回來時要幫它開編輯視窗
+  lookupAt: 0          // 按下的時間，用來分辨「真的離開又回來」
 };
 
 /* ---------- 小提示 ---------- */
@@ -367,6 +369,49 @@ function releaseShots() {
   view.shots = [];
 }
 
+/* ---------- 查店名 ----------
+   App 自己沒辦法查到店名（免費的地圖資料庫幾乎沒收錄 IG 小店，Google 的要綁信用卡），
+   所以做成「一鍵帶你去看」：用地址開 Google 地圖，或直接打開那個 IG 帳號。
+   你看到店名切回來時，編輯視窗會自動打開等你貼上。 */
+function lookupLinks(it, i) {
+  const links = [];
+  if (it._address) {
+    // 店名待確認的那筆，mapQuery 只有地址（已補好縣市），剛好拿來查
+    const q = it.mapQuery || it._address;
+    links.push(`<a class="lk" data-lookup="${i}" target="_blank" rel="noopener"
+      href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}">🗺 地圖看這個地址</a>`);
+  }
+  if (it._handle) {
+    // 手機上這個網址會直接跳到 IG App 的那個帳號
+    links.push(`<a class="lk" data-lookup="${i}" target="_blank" rel="noopener"
+      href="https://www.instagram.com/${encodeURIComponent(it._handle)}/">📷 打開 IG @${esc(it._handle)}</a>`);
+  }
+  if (!links.length) {
+    const trip = currentTrip();
+    const q = ((trip ? guessCity(trip.name) + ' ' : '') + it.name).trim();
+    links.push(`<a class="lk" data-lookup="${i}" target="_blank" rel="noopener"
+      href="https://www.google.com/search?q=${encodeURIComponent(q)}">🔍 Google 搜尋</a>`);
+  }
+  return `<span class="lookup">${links.join('')}</span>`;
+}
+
+/** 從 Google 地圖 / IG 切回來：幫你打開那一筆的編輯視窗，名稱欄選好等你貼 */
+function onReturnFromLookup() {
+  if (view.lookupIndex == null || !view.pending) return;
+  if (Date.now() - view.lookupAt < 800) return;      // 剛按下就觸發的不算「回來」
+  const i = view.lookupIndex;
+  view.lookupIndex = null;
+  if (!view.pending.items[i]) return;
+
+  let nameInput = document.querySelector('.sheet #sName');
+  if (!nameInput) {
+    openStopForm({ mode: 'pending', stop: view.pending.items[i], index: i });
+    nameInput = document.querySelector('.sheet #sName');
+  }
+  if (nameInput) { nameInput.focus(); nameInput.select(); }
+  toast('查到店名了嗎？點名稱欄貼上或打字');
+}
+
 /** 解析結果的確認卡 —— 一定要你看過、勾過才寫進行程 */
 function renderCard(msg) {
   const trip = currentTrip();
@@ -389,6 +434,7 @@ function renderCard(msg) {
               ${it.alt ? '<span class="pill pill-alt">備案</span>' : ''}
             </span>
             ${it.note ? `<span class="pk-note">${esc(it.note)}</span>` : ''}
+            ${it._nameUnsure ? lookupLinks(it, i) : ''}
           </span>
           <button class="pk-edit" data-fix="${i}" type="button" aria-label="修改這筆">✎</button>
         </label>`).join('')}
@@ -626,7 +672,8 @@ function openStopForm(opts) {
         ${trip.days.map((d, i) => `<option value="${d.id}" ${d.id === dayId ? 'selected' : ''}>Day ${i + 1}　${esc(formatDateLabel(d.date))}</option>`).join('')}
       </select></div>` : ''}
     </div>
-    <div class="field"><label>名稱</label><input type="text" id="sName" value="${esc(s.name)}" placeholder="店名或景點名稱"></div>
+    <div class="field"><label>名稱</label><input type="text" id="sName" value="${esc(s.name)}" placeholder="店名或景點名稱">
+      ${(mode === 'pending' && s._nameUnsure) ? lookupLinks(s, index) : ''}</div>
     <div class="field"><label>備註</label><textarea id="sNote" placeholder="地址、營業時間、注意事項…">${esc(s.note)}</textarea></div>
     <div class="field"><label>Google Maps 搜尋詞</label><input type="text" id="sMap" value="${esc(s.mapQuery)}" placeholder="地址 + 店名，找得最準"></div>
     <div class="field"><label>類型</label><select id="sType">
@@ -973,6 +1020,19 @@ $('#chips').addEventListener('click', e => {
   t.value = e.target.textContent;
   autoGrow(); t.focus();
 });
+
+// 查店名：記住按的是哪一筆（不擋連結，讓它照常打開地圖 / IG）
+document.addEventListener('click', e => {
+  const a = e.target.closest('[data-lookup]');
+  if (!a) return;
+  view.lookupIndex = +a.getAttribute('data-lookup');
+  view.lookupAt = Date.now();
+});
+// 切回 App 的兩種訊號：手機是「畫面重新出現」，電腦是「分頁重新取得焦點」
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') onReturnFromLookup();
+});
+window.addEventListener('focus', onReturnFromLookup);
 
 // 分頁與返回
 $('#tabPlan').onclick = () => go('plan');
