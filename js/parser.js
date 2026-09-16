@@ -366,13 +366,14 @@ function parseEntry(raw, cityHint = '') {
       .replace(/[，,、]{2,}/g, '，')
   );
 
-  // --- 8. 組 note：格式跟原本台南資料一致「地址｜營業時間｜備註」---
+  // --- 8. 組 note：營業時間｜其他備註｜電話｜IG ---
+  //     地址不放進備註，因為下面的 mapQuery 已經有了，兩邊都顯示會變成重複的字
   const hours = hoursParts.join(' ').replace(/\s{2,}/g, ' ').trim();
   const handleNote = handles.map(h => '@' + h).join(' ');
-  const noteParts = [address, hours, extra, phones.join(' '), handleNote].map(tidy).filter(Boolean);
-  const note = noteParts.join('｜');
+  const noteParts = [hours, extra, phones.join(' '), handleNote].map(tidy).filter(Boolean);
 
   // --- 9. Google Maps 搜尋詞：地址 + 店名，命中率最高 ---
+  //     （note 要等這裡算完才能組好，因為要確認地址真的有被帶進搜尋詞）
   //     店名是猜的（例如帳號）就只用地址，帶著奇怪的字 Google 反而找不到
   let mapQuery = '';
   if (address) {
@@ -382,6 +383,10 @@ function parseEntry(raw, cityHint = '') {
   } else {
     mapQuery = ((cityHint ? cityHint + ' ' : '') + name).trim();
   }
+
+  // 萬一地址沒被帶進搜尋詞，還是要留在備註裡，不然地址就整個不見了
+  if (address && !mapQuery.includes(address)) noteParts.unshift(address);
+  const note = noteParts.join('｜');
 
   return {
     time: time || '待定',

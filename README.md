@@ -62,7 +62,7 @@ trip-app/
         id,
         time: "19:30",               // 時間，或「下午」「待定」
         name: "火星 Cafe Mars",
-        note: "地址｜營業時間｜備註",
+        note: "營業時間｜備註｜電話｜IG",   // 地址不放這裡，mapQuery 已經有了
         type: "food",                // food/cafe/sight/shop/hotel/transit
         mapQuery: "台南市中西區永和街69號 火星Cafe Mars",
         booked: true,                // 已訂位
@@ -105,7 +105,7 @@ trip-app/
     {
       "time": "19:30",
       "name": "火星 Cafe Mars",
-      "note": "台南市中西區永和街69號｜週四–日 12:00–21:00",
+      "note": "週四–日 12:00–21:00｜僅 9 位",
       "type": "food",
       "mapQuery": "台南市中西區永和街69號 火星Cafe Mars",
       "booked": true,
