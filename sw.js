@@ -12,7 +12,7 @@
    現在改成「先連網拿最新的，沒網路才用快取」，而且抓檔時明講不要用暫存。
    ============================================================ */
 
-const CACHE_NAME = 'trip-app-v8';
+const CACHE_NAME = 'trip-app-v9';
 
 // 要預先存起來的檔案。路徑一律用相對路徑（'./'），
 // 因為 GitHub Pages 是放在 /trip-app/ 子目錄下，寫成 '/' 開頭會找不到。
@@ -26,7 +26,8 @@ const ASSETS = [
   './js/app.js',
   './manifest.json',
   './icons/icon-192.png',
-  './icons/icon-512.png'
+  './icons/icon-512.png',
+  './icons/apple-touch-icon.png'
 ];
 
 // 安裝：把檔案抓下來存好。cache:'reload' = 直接問伺服器，不要拿瀏覽器暫存的舊檔
