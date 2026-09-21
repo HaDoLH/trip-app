@@ -10,11 +10,33 @@ const TYPE_NAMES = { food: '餐廳', cafe: '咖啡 / 飲料', sight: '景點', s
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
 // 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
-const APP_VERSION = 'v9';
+const APP_VERSION = 'v10';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)
   .replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/* ---------- 分享連結 ----------
+   只放行 http / https。不檢查的話，貼上 javascript: 開頭的網址會變成可執行的程式碼。 */
+function safeUrl(u) {
+  const s = String(u || '').trim();
+  return /^https?:\/\//i.test(s) ? s : '';
+}
+
+/** 依網址判斷要顯示什麼標籤，一眼看得出是哪個平台 */
+function linkLabel(u) {
+  const s = safeUrl(u);
+  if (!s) return '';
+  try {
+    const host = new URL(s).hostname.replace(/^www\./, '');
+    if (host.includes('instagram')) return 'Instagram';
+    if (host.includes('threads')) return 'Threads';
+    if (host.includes('facebook') || host === 'fb.com') return 'Facebook';
+    if (host.includes('goo.gl') || host.includes('google')) return 'Google 地圖';
+    if (host.includes('youtube') || host.includes('youtu.be')) return 'YouTube';
+    return host;
+  } catch (e) { return '連結'; }
+}
 
 /* 目前畫面的狀態（跟資料無關，重整就歸零） */
 const view = {
@@ -144,7 +166,10 @@ function renderStop(stop, color) {
           ${stop.alt ? '<span class="pill pill-alt">備案</span>' : ''}
         </div>
         ${stop.note ? `<div class="stop-note">${esc(stop.note)}</div>` : ''}
-        ${mapUrl ? `<a class="map-link" href="${mapUrl}" target="_blank" rel="noopener">🗺 Google Maps</a>` : ''}
+        <div class="stop-links">
+          ${mapUrl ? `<a class="map-link" href="${mapUrl}" target="_blank" rel="noopener">🗺 Google Maps</a>` : ''}
+          ${safeUrl(stop.link) ? `<a class="map-link" href="${esc(safeUrl(stop.link))}" target="_blank" rel="noopener">🔗 ${esc(linkLabel(stop.link))}</a>` : ''}
+        </div>
       </div>
       <button class="stop-edit" data-edit-stop="${stop.id}" aria-label="編輯 ${esc(stop.name)}">✎</button>
     </li>`;
@@ -434,6 +459,7 @@ function renderCard(msg) {
               ${it.alt ? '<span class="pill pill-alt">備案</span>' : ''}
             </span>
             ${it.note ? `<span class="pk-note">${esc(it.note)}</span>` : ''}
+            ${safeUrl(it.link) ? `<span class="pk-note">🔗 ${esc(linkLabel(it.link))} 連結已帶入</span>` : ''}
             ${it._nameUnsure ? lookupLinks(it, i) : ''}
           </span>
           <button class="pk-edit" data-fix="${i}" type="button" aria-label="修改這筆">✎</button>
@@ -481,7 +507,7 @@ function commitPending(dayId) {
   picked.forEach(item => {
     addStop(view.tripId, dayId, {
       time: item.time, name: item.name, note: item.note,
-      type: item.type, mapQuery: item.mapQuery,
+      type: item.type, mapQuery: item.mapQuery, link: item.link || '',
       booked: !!item.booked, alt: !!item.alt
     });
   });
@@ -676,6 +702,9 @@ function openStopForm(opts) {
       ${(mode === 'pending' && s._nameUnsure) ? lookupLinks(s, index) : ''}</div>
     <div class="field"><label>備註</label><textarea id="sNote" placeholder="地址、營業時間、注意事項…">${esc(s.note)}</textarea></div>
     <div class="field"><label>Google Maps 搜尋詞</label><input type="text" id="sMap" value="${esc(s.mapQuery)}" placeholder="地址 + 店名，找得最準"></div>
+    <div class="field"><label>分享連結</label>
+      <input type="url" id="sLink" value="${esc(s.link || '')}" placeholder="貼上 IG / Threads 貼文連結" inputmode="url" autocapitalize="off">
+      <p class="note">別人分享的貼文網址貼這裡，行程上就能直接點開</p></div>
     <div class="field"><label>類型</label><select id="sType">
       ${Object.keys(TYPE_NAMES).map(k => `<option value="${k}" ${k === s.type ? 'selected' : ''}>${TYPE_ICONS[k]} ${TYPE_NAMES[k]}</option>`).join('')}
     </select></div>
@@ -699,6 +728,7 @@ function openStopForm(opts) {
         name,
         note: root.querySelector('#sNote').value.trim(),
         mapQuery: root.querySelector('#sMap').value.trim(),
+        link: root.querySelector('#sLink').value.trim(),
         type: root.querySelector('#sType').value,
         booked: root.querySelector('#sBooked').checked,
         alt: root.querySelector('#sAlt').checked

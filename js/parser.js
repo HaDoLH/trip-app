@@ -49,6 +49,10 @@ const RE_ALT = /(備案|替代方案|候補|plan\s*b|第二選擇)/i;
 /* ---------- 截圖取字常混進來的雜訊 ----------
    IG、Google Maps 截圖用實況文字取字時，畫面上的按鈕和數字也會一起被抓下來。 */
 
+// 分享連結：完整網址，或是沒寫 https:// 的 instagram.com/... threads.com/...
+const RE_URL_FULL = /https?:\/\/[^\s，,、；;）)｜|]+/i;
+const RE_URL_BARE = /(?:^|[\s(（])((?:www\.)?(?:instagram\.com|threads\.(?:net|com)|facebook\.com|fb\.com|maps\.app\.goo\.gl|goo\.gl)\/[^\s，,、；;）)｜|]+)/i;
+
 // IG 帳號（@ 前面要是行首或空白，才不會把 email 誤認成帳號）
 // 帳號前面常寫著「IG」「Instagram」「FB」這類標籤，一起帶走，
 // 不然抽掉帳號後會留下孤零零的「IG」兩個字
@@ -269,6 +273,22 @@ function parseEntry(raw, cityHint = '') {
   let work = original.split('\n').map(cleanNoise).filter(Boolean).join('\n');
   work = work.replace(RE_LABELS, ' ');   // 拆掉「店名：」「地址：」這類標籤
 
+  // 分享連結先抽走（要在抓帳號之前，不然網址裡的文字會被誤判）
+  //     連結存成獨立欄位，行程上就能直接點開原始貼文
+  let link = '';
+  const mFull = work.match(RE_URL_FULL);
+  if (mFull) {
+    link = mFull[0];
+    work = work.replace(mFull[0], ' ');
+  } else {
+    const mBare = work.match(RE_URL_BARE);
+    if (mBare) {
+      link = 'https://' + mBare[1].replace(/^www\./, '');
+      work = work.replace(mBare[1], ' ');
+    }
+  }
+  link = link.replace(/[。，,、；;）)】\]]+$/, '');   // 句尾標點不算網址的一部分
+
   // IG 帳號另外收起來：不當店名，放進備註
   const handles = [];
   work = work.replace(RE_HANDLE, (_whole, lead, h) => { handles.push(h); return lead; });
@@ -394,6 +414,7 @@ function parseEntry(raw, cityHint = '') {
     time: time || '待定',
     name,
     note,
+    link,
     type: guessType(name, original),
     mapQuery,
     booked,

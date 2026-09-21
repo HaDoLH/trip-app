@@ -228,6 +228,8 @@ body{
   color:var(--link); text-decoration:none; margin-top:4px;
 }
 .map-link:hover{text-decoration:underline}
+/* 地圖與分享連結並排，太擠就自動折行 */
+.stop-links{display:flex; flex-wrap:wrap; gap:4px 12px}
 .stop-edit{
   flex:0 0 auto; border:none; background:transparent; color:var(--ink-3);
   cursor:pointer; font-size:13px; padding:11px 10px; align-self:flex-start;

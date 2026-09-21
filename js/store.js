@@ -291,7 +291,7 @@ function deleteDay(tripId, dayId) {
 function addStop(tripId, dayId, stopData) {
   const day = getDay(getTrip(tripId), dayId);
   if (!day) return null;
-  const stop = Object.assign({ id: uid(), time: '待定', name: '', note: '', type: 'sight', mapQuery: '', booked: false, alt: false }, stopData);
+  const stop = Object.assign({ id: uid(), time: '待定', name: '', note: '', type: 'sight', mapQuery: '', link: '', booked: false, alt: false }, stopData);
   if (!stop.id) stop.id = uid();
   day.stops.push(stop);
   saveDB();

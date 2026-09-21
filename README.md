@@ -65,6 +65,8 @@ trip-app/
         note: "營業時間｜備註｜電話｜IG",   // 地址不放這裡，mapQuery 已經有了
         type: "food",                // food/cafe/sight/shop/hotel/transit
         mapQuery: "台南市中西區永和街69號 火星Cafe Mars",
+        link: "https://www.instagram.com/p/xxx/",   // 分享連結，只接受 http/https
+
         booked: true,                // 已訂位
         alt: false                   // 備案
       }]
