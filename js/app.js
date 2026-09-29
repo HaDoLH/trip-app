@@ -10,7 +10,7 @@ const TYPE_NAMES = { food: '餐廳', cafe: '咖啡 / 飲料', sight: '景點', s
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
 // 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
-const APP_VERSION = 'v11';
+const APP_VERSION = 'v12';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)
@@ -131,6 +131,9 @@ function renderPlan() {
   const c = dayColor(trip.color, idx);
   const routeUrl = buildRouteUrl(day);
 
+  // 舊資料裡「11:40台中出發 12:17到台南」這種，一鍵拆成出發＋抵達兩筆
+  const splittable = splittableStops(day);
+
   const stopsHtml = day.stops.length
     ? day.stops.map(stop => renderStop(stop, c)).join('')
     : `<li class="empty">這天還沒有安排。<br>到下面的 <strong>＋ 新增</strong> 分頁貼一段文字，<br>或按「手動新增一筆」。</li>`;
@@ -142,6 +145,11 @@ function renderPlan() {
       <span class="day-date">${esc(formatDateLabel(day.date))}</span>
       ${routeUrl ? `<button class="day-route" id="btnRoute">🗺 看今日路線</button>` : ''}
     </div>
+    ${splittable.length ? `
+      <div class="hint-bar">
+        <span>有 ${splittable.length} 筆交通寫成一整句，可以拆成「出發」「抵達」兩筆，時間軸才排得對。</span>
+        <button id="btnSplitTransit">✂ 拆開</button>
+      </div>` : ''}
     <ul class="stops" id="stopList">${stopsHtml}</ul>
     <div class="day-foot">
       <button class="ghost-btn" id="btnAddStop">＋ 手動新增一筆</button>
@@ -1154,6 +1162,14 @@ $('#dayView').addEventListener('click', e => {
     const on = toggleDone(trip.id, day.id, doneBtn.getAttribute('data-done'));
     renderPlan();
     toast(on ? '打勾了 ✓' : '取消打勾，之後會出現在口袋清單');
+    return;
+  }
+  if (e.target.closest('#btnSplitTransit')) {
+    const targets = splittableStops(day).map(s => s.id);
+    let made = 0;
+    targets.forEach(id => { made += splitTransitStop(trip.id, day.id, id); });
+    renderPlan();
+    toast(made ? `已拆成 ${made} 筆` : '這次沒有可以拆的');
     return;
   }
   if (e.target.closest('#btnSortTime')) {

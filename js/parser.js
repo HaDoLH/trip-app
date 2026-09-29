@@ -302,31 +302,53 @@ function stationName(raw, hint) {
 }
 
 /**
+ * 看一段文字能不能拆成「出發＋抵達」。
+ * 可以的話回傳 [{time,name,note}, {time,name,note}]，不行就回傳 null。
+ * 拆解本身不碰其他欄位，這樣新解析的和已經存進去的舊資料可以共用同一套規則。
+ */
+function transitPartsOf(text) {
+  const src = String(text || '');
+  const dep = src.match(RE_DEPART);
+  const arr = src.match(RE_ARRIVE);
+  if (!dep || !arr) return null;
+
+  const hint = /高鐵/.test(src) ? '高鐵站'
+    : (/台鐵|臺鐵|火車|區間車|自強/.test(src) ? '火車站'
+      : (/機場|班機|飛機|航班/.test(src) ? '機場' : ''));
+  const from = stationName(dep[2], hint);
+  const to = stationName(arr[2], hint);
+  if (!from || !to) return null;
+
+  // 時間前面那段字（例如「高鐵時間」）留著當備註
+  //  先 tidy 再拿掉結尾的「時間」——順序反過來的話，尾巴的空白會讓 /時間$/ 對不到
+  const label = tidy(src.slice(0, Math.min(dep.index, arr.index))).replace(/\s*時間$/, '').trim();
+  return [
+    { time: normalizeTime(dep[1]), name: `${from} 出發`, note: label, mapQuery: from },
+    { time: normalizeTime(arr[1]), name: `${to} 抵達`, note: label, mapQuery: to }
+  ];
+}
+
+/**
  * 一筆行程如果是「出發＋抵達」，拆成兩筆；不是就原樣回傳。
  * 出發地常常在別的縣市，所以這裡不套用 cityHint。
  */
 function expandTransit(stop) {
-  const src = stop._raw || '';
-  const dep = src.match(RE_DEPART);
-  const arr = src.match(RE_ARRIVE);
-  if (!dep || !arr) return [stop];
-
-  const hint = /高鐵/.test(src) ? '高鐵站'
-    : (/台鐵|臺鐵|火車|區間車|自強/.test(src) ? '火車站'
-      : (/機場|班機|飛機/.test(src) ? '機場' : ''));
-  const from = stationName(dep[2], hint);
-  const to = stationName(arr[2], hint);
-  if (!from || !to) return [stop];
-
-  // 時間前面那段字（例如「高鐵時間」）留著當備註
-  const label = tidy(src.slice(0, Math.min(dep.index, arr.index)).replace(/時間$/, ''));
-  const mk = (clock, place, verb) => ({
-    time: normalizeTime(clock), name: `${place} ${verb}`, note: label,
-    link: stop.link || '', type: 'transit', mapQuery: place,
+  const parts = transitPartsOf(stop._raw || '');
+  if (!parts) return [stop];
+  return parts.map(p => Object.assign({}, p, {
+    link: stop.link || '', type: 'transit',
     booked: !!stop.booked, alt: !!stop.alt,
-    _raw: src, _address: '', _nameUnsure: false, _handle: '', _date: stop._date || null
-  });
-  return [mk(dep[1], from, '出發'), mk(arr[1], to, '抵達')];
+    _raw: stop._raw, _address: '', _nameUnsure: false, _handle: '', _date: stop._date || null
+  }));
+}
+
+/**
+ * 已經存進行程裡的那一筆，能不能拆？
+ * 舊資料沒有 _raw，所以從店名和備註拼回一段文字來看。
+ */
+function transitPartsOfStop(stop) {
+  if (!stop || stop.done) return null;
+  return transitPartsOf(`${stop.name || ''} ${stop.note || ''}`);
 }
 
 /* ============================================================

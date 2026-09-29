@@ -352,6 +352,35 @@ function updateStop(tripId, dayId, stopId, stopData, newDayId) {
   return { moved: false, dayId };
 }
 
+/**
+ * 把已經存進行程的「出發＋抵達」拆成兩筆。
+ * 原本那筆會被這兩筆取代（位置不動），其他欄位（連結、備案）照抄。
+ */
+function splitTransitStop(tripId, dayId, stopId) {
+  const day = getDay(getTrip(tripId), dayId);
+  if (!day) return 0;
+  const idx = day.stops.findIndex(s => s.id === stopId);
+  if (idx < 0) return 0;
+  const stop = day.stops[idx];
+  const parts = typeof transitPartsOfStop === 'function' ? transitPartsOfStop(stop) : null;
+  if (!parts) return 0;
+
+  const made = parts.map(pt => Object.assign({}, stop, pt, {
+    id: uid(), type: 'transit',
+    // 拆出來的兩筆各自指向自己的車站，不要共用原本那筆的搜尋詞
+    mapQuery: pt.mapQuery, link: stop.link || ''
+  }));
+  day.stops.splice(idx, 1, ...made);
+  sortDayByTime(tripId, dayId);
+  return made.length;
+}
+
+/** 這一天有幾筆可以拆 */
+function splittableStops(day) {
+  if (!day || typeof transitPartsOfStop !== 'function') return [];
+  return day.stops.filter(s => transitPartsOfStop(s));
+}
+
 /** 打勾 / 取消打勾（這次有沒有真的去成） */
 function toggleDone(tripId, dayId, stopId) {
   const day = getDay(getTrip(tripId), dayId);
