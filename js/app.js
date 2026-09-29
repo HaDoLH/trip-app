@@ -10,7 +10,7 @@ const TYPE_NAMES = { food: '餐廳', cafe: '咖啡 / 飲料', sight: '景點', s
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
 // 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
-const APP_VERSION = 'v12';
+const APP_VERSION = 'v13';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)
@@ -677,14 +677,20 @@ function openPocketPicker(srcTripId, srcDayId, stopId) {
   const src = getDay(getTrip(srcTripId), srcDayId);
   const stop = src ? src.stops.find(s => s.id === stopId) : null;
   if (!stop) return;
-  const others = DB.trips;
+  /* 排序：還沒出發的旅程排前面（那才是你想排進去的），同組再依出發日。
+     預設選「不是它自己那一趟」的第一個 —— 會用這個功能就是要換一趟。 */
+  const others = DB.trips.slice().sort((a, b) => {
+    const oa = tripIsOver(a) ? 1 : 0, ob = tripIsOver(b) ? 1 : 0;
+    return oa - ob || String(a.dateStart).localeCompare(String(b.dateStart));
+  });
   if (!others.length) { toast('還沒有其他旅程'); return; }
+  const preferred = (others.find(t => t.id !== srcTripId) || others[0]).id;
 
   openSheet(`
     <h2>排進哪一趟？</h2>
     <p>把「${esc(stop.name)}」複製到另一趟旅程。原本那筆會留著，只是不再出現在口袋清單。</p>
     <div class="field"><label>旅程</label><select id="pkTrip">
-      ${others.map(t => `<option value="${t.id}">${esc(t.emoji || '')} ${esc(t.name)}</option>`).join('')}
+      ${others.map(t => `<option value="${t.id}" ${t.id === preferred ? 'selected' : ''}>${esc(t.emoji || '')} ${esc(t.name)}${tripIsOver(t) ? '（已結束）' : ''}</option>`).join('')}
     </select></div>
     <div class="field"><label>哪一天</label><select id="pkDay"></select></div>
     <div class="sheet-actions">
