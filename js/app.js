@@ -10,7 +10,7 @@ const TYPE_NAMES = { food: '餐廳', cafe: '咖啡 / 飲料', sight: '景點', s
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
 // 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
-const APP_VERSION = 'v13';
+const APP_VERSION = 'v14';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)
@@ -36,6 +36,15 @@ function linkLabel(u) {
     if (host.includes('youtube') || host.includes('youtu.be')) return 'YouTube';
     return host;
   } catch (e) { return '連結'; }
+}
+
+/* ---------- 備註斷行 ----------
+   備註是用全形直線「｜」串起來的（營業時間｜備註｜電話｜IG）。
+   擠成一整段很難讀，所以顯示時拆成一行一項 —— 就像排版時把
+   一段長文改成條列，資訊量沒變但眼睛找得到東西。      */
+function noteLines(note) {
+  return String(note || '').split('｜').map(t => t.trim()).filter(Boolean)
+    .map(t => `<span>${esc(t)}</span>`).join('');
 }
 
 /* 目前畫面的狀態（跟資料無關，重整就歸零） */
@@ -172,7 +181,7 @@ function renderStop(stop, color) {
       <button class="stop-check" data-done="${stop.id}" role="checkbox"
               aria-checked="${!!stop.done}" title="${stop.done ? '取消完成' : '標記為已完成'}"
               aria-label="${stop.done ? '取消完成' : '標記為已完成'} ${esc(stop.name)}">✓</button>
-      <div class="stop-time">${esc(stop.time || '')}</div>
+      <div class="stop-time ${timeMinutes(stop.time) === null ? 'tbd' : ''}">${esc(stop.time || '')}</div>
       <div class="stop-body">
         <div class="stop-name">
           <span>${TYPE_ICONS[stop.type] || '📍'}</span>
@@ -180,7 +189,7 @@ function renderStop(stop, color) {
           ${stop.booked ? '<span class="pill pill-booked">已訂位 ✅</span>' : ''}
           ${stop.alt ? '<span class="pill pill-alt">備案</span>' : ''}
         </div>
-        ${stop.note ? `<div class="stop-note">${esc(stop.note)}</div>` : ''}
+        ${stop.note ? `<div class="stop-note">${noteLines(stop.note)}</div>` : ''}
         <div class="stop-links">
           ${mapUrl ? `<a class="map-link" href="${mapUrl}" target="_blank" rel="noopener">🗺 Google Maps</a>` : ''}
           ${safeUrl(stop.link) ? `<a class="map-link" href="${esc(safeUrl(stop.link))}" target="_blank" rel="noopener">🔗 ${esc(linkLabel(stop.link))}</a>` : ''}
@@ -505,7 +514,7 @@ function renderCard(msg) {
               ${it.booked ? '<span class="pill pill-booked">已訂位</span>' : ''}
               ${it.alt ? '<span class="pill pill-alt">備案</span>' : ''}
             </span>
-            ${it.note ? `<span class="pk-note">${esc(it.note)}</span>` : ''}
+            ${it.note ? `<span class="pk-note">${noteLines(it.note)}</span>` : ''}
             ${safeUrl(it.link) ? `<span class="pk-note">🔗 ${esc(linkLabel(it.link))} 連結已帶入</span>` : ''}
             ${it._nameUnsure ? lookupLinks(it, i) : ''}
           </span>
