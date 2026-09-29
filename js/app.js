@@ -10,7 +10,7 @@ const TYPE_NAMES = { food: '餐廳', cafe: '咖啡 / 飲料', sight: '景點', s
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
 // 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
-const APP_VERSION = 'v10';
+const APP_VERSION = 'v11';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)
@@ -48,7 +48,10 @@ const view = {
   shots: [],           // 暫存的截圖網址（重整就消失，不會存進硬碟）
   guideOS: null,       // 取字步驟目前顯示哪個系統
   lookupIndex: null,   // 按了「查店名」的是確認卡上第幾筆，回來時要幫它開編輯視窗
-  lookupAt: 0          // 按下的時間，用來分辨「真的離開又回來」
+  lookupAt: 0,         // 按下的時間，用來分辨「真的離開又回來」
+  // 搜尋 / 口袋清單頁的狀態
+  find: { mode: 'pocket', q: '', region: '全部', includeActive: false },
+  flashStop: null      // 從搜尋跳過去時，要閃一下提示你是哪一筆
 };
 
 /* ---------- 小提示 ---------- */
@@ -142,6 +145,7 @@ function renderPlan() {
     <ul class="stops" id="stopList">${stopsHtml}</ul>
     <div class="day-foot">
       <button class="ghost-btn" id="btnAddStop">＋ 手動新增一筆</button>
+      <button class="ghost-btn" id="btnSortTime">⇅ 依時間排序</button>
       <button class="ghost-btn" id="btnEditDay">✎ 這天的標題</button>
       <button class="ghost-btn" id="btnAddDay">＋ 加一天</button>
       ${trip.days.length > 1 ? `<button class="ghost-btn danger" id="btnDelDay">刪除這天</button>` : ''}
@@ -155,8 +159,11 @@ function renderStop(stop, color) {
     ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stop.mapQuery)}`
     : '';
   return `
-    <li class="stop ${stop.alt ? 'alt-stop' : ''}" data-stop="${stop.id}" style="--c:${color}">
+    <li class="stop ${stop.alt ? 'alt-stop' : ''} ${stop.done ? 'stop-done' : ''}" data-stop="${stop.id}" style="--c:${color}">
       <div class="stop-grip" title="按住拖曳可以調整順序">⠿</div>
+      <button class="stop-check" data-done="${stop.id}" role="checkbox"
+              aria-checked="${!!stop.done}" title="${stop.done ? '取消完成' : '標記為已完成'}"
+              aria-label="${stop.done ? '取消完成' : '標記為已完成'} ${esc(stop.name)}">✓</button>
       <div class="stop-time">${esc(stop.time || '')}</div>
       <div class="stop-body">
         <div class="stop-name">
@@ -437,6 +444,37 @@ function onReturnFromLookup() {
   toast('查到店名了嗎？點名稱欄貼上或打字');
 }
 
+/* ---------- 文字裡有寫日期就自動對到那一天 ----------
+   解析器會把「10/18」收進 _date，這裡把它對回這趟旅程的第幾天，
+   就不用每次加完再自己選。對不到（不在這趟的日期範圍內）就維持手動選。 */
+function dayIdForDate(trip, d) {
+  if (!trip || !d) return null;
+  const hit = trip.days.find(day => {
+    if (!day.date) return false;
+    const dt = fromYmd(day.date);
+    return dt.getMonth() + 1 === d.month && dt.getDate() === d.day;
+  });
+  return hit ? hit.id : null;
+}
+
+/** '2026-10-18' 或 '10/18' → { month, day }。給匯入的 JSON 用 */
+function parseYmdish(str) {
+  const m = String(str || '').match(/(\d{1,2})\s*[\/月-]\s*(\d{1,2})\s*日?\s*$/);
+  return m ? { month: +m[1], day: +m[2] } : null;
+}
+
+/** 'Day 2　10/18 週六' 這種標籤 */
+function dayLabelOf(trip, dayId) {
+  const i = trip.days.findIndex(d => d.id === dayId);
+  if (i < 0) return '';
+  return `Day ${i + 1}　${formatDateLabel(trip.days[i].date)}`;
+}
+
+/** 這一筆最後會被加到哪一天：優先用文字裡寫的日期，沒有才用下面下拉選的 */
+function targetDayOf(item, fallbackDayId) {
+  return item._dayId || fallbackDayId;
+}
+
 /** 解析結果的確認卡 —— 一定要你看過、勾過才寫進行程 */
 function renderCard(msg) {
   const trip = currentTrip();
@@ -454,6 +492,7 @@ function renderCard(msg) {
             <span class="pk-top">
               <span class="pk-time">${esc(it.time)}</span>
               <span class="pk-name">${TYPE_ICONS[it.type] || '📍'} ${esc(it.name)}</span>
+              ${it._dayId ? `<span class="pill pill-day">${esc(dayLabelOf(trip, it._dayId))}</span>` : ''}
               ${it._nameUnsure ? '<span class="pill pill-alt">店名待確認 ✎</span>' : ''}
               ${it.booked ? '<span class="pill pill-booked">已訂位</span>' : ''}
               ${it.alt ? '<span class="pill pill-alt">備案</span>' : ''}
@@ -466,7 +505,8 @@ function renderCard(msg) {
         </label>`).join('')}
     </div>
     <div class="where">
-      加到：
+      ${items.some(i => i._dayId) ? '<p class="note" style="margin:0 0 6px">有寫日期的那幾筆，已經自動排到對應的那一天。</p>' : ''}
+      其餘加到：
       <select data-target-day>
         ${trip.days.map((d, i) =>
           `<option value="${d.id}" ${d.id === view.dayId ? 'selected' : ''}>Day ${i + 1}　${esc(formatDateLabel(d.date))}</option>`
@@ -494,7 +534,7 @@ function handleSend() {
     pushMsg({ role: 'bot', text: '這段我看不出來有店名耶。可以試著把「店名、地址、營業時間」都貼進來，或每家之間空一行。' });
     return;
   }
-  stops.forEach(s => { s._on = true; });
+  stops.forEach(s => { s._on = true; s._dayId = dayIdForDate(trip, s._date); });
   view.pending = { items: stops };
   pushMsg({ role: 'bot', card: view.pending });
 }
@@ -504,8 +544,11 @@ function commitPending(dayId) {
   if (!view.pending) return;
   const picked = view.pending.items.filter(i => i._on);
   if (!picked.length) return;
+  const used = new Set();
   picked.forEach(item => {
-    addStop(view.tripId, dayId, {
+    const target = targetDayOf(item, dayId);
+    used.add(target);
+    addStop(view.tripId, target, {
       time: item.time, name: item.name, note: item.note,
       type: item.type, mapQuery: item.mapQuery, link: item.link || '',
       booked: !!item.booked, alt: !!item.alt
@@ -516,7 +559,8 @@ function commitPending(dayId) {
   view.dayId = dayId;
   view.pending = null;
   // 把卡片換成完成訊息，避免重複按
-  view.chat[view.chat.length - 1] = { role: 'bot', text: `✅ 已加入 ${picked.length} 筆到 Day ${dayIdx + 1}。\n可以到「行程」分頁看看，順序可以用左邊的 ⠿ 拖曳調整。` };
+  const spread = used.size > 1 ? `，分別排進 ${used.size} 天` : '';
+  view.chat[view.chat.length - 1] = { role: 'bot', text: `✅ 已加入 ${picked.length} 筆到 Day ${dayIdx + 1}${spread}。\n可以到「行程」分頁看看，順序可以用左邊的 ⠿ 拖曳調整。` };
   renderChat();
   renderPlan();
   toast(`已加入 ${picked.length} 筆`);
@@ -527,6 +571,136 @@ function autoGrow() {
   const t = $('#msgInput');
   t.style.height = 'auto';
   t.style.height = Math.min(t.scrollHeight, 130) + 'px';
+}
+
+/* ============================================================
+   三之二、搜尋 ＋ 口袋清單
+
+   行程結束後，沒去成的店不該就這樣被埋在舊旅程裡。
+   這一頁把所有旅程的行程攤平，依地區分組，
+   想得起來就用搜尋找，想不起來就從口袋清單挑。
+   ============================================================ */
+
+/** 目前這一頁要顯示哪些資料 */
+function findRows() {
+  const f = view.find;
+  const base = f.mode === 'pocket' ? collectPocket(f.includeActive) : allStops();
+  return base.filter(r => matchStop(r, f.q) && (f.region === '全部' || r.region === f.region));
+}
+
+function renderFind() {
+  const f = view.find;
+  // 地區按鈕要從「還沒套地區篩選」的清單算，否則按下去之後其他地區就消失了
+  const pool = (f.mode === 'pocket' ? collectPocket(f.includeActive) : allStops())
+    .filter(r => matchStop(r, f.q));
+
+  const counts = {};
+  pool.forEach(r => { counts[r.region] = (counts[r.region] || 0) + 1; });
+  const regions = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+  if (f.region !== '全部' && !counts[f.region]) f.region = '全部';   // 篩到空的就自動放寬
+
+  $('#findRegions').innerHTML =
+    [`<button type="button" class="rg" data-rg="全部" aria-pressed="${f.region === '全部'}">全部 ${pool.length}</button>`]
+      .concat(regions.map(r =>
+        `<button type="button" class="rg" data-rg="${esc(r)}" aria-pressed="${f.region === r}">${esc(r)} ${counts[r]}</button>`))
+      .join('');
+
+  const rows = findRows();
+  const box = $('#findList');
+
+  if (!rows.length) {
+    box.innerHTML = `<div class="empty">${f.q
+      ? '找不到符合的行程。<br>換個關鍵字試試，店名、地址、備註都找得到。'
+      : (f.mode === 'pocket'
+        ? '目前沒有「沒去成」的行程。<br><br>行程上按左邊的 <strong>✓</strong> 打勾表示去過了，<br>旅程結束後沒打勾的就會出現在這裡。'
+        : '還沒有任何行程。')}</div>`;
+    return;
+  }
+
+  // 依地區分組，同一地區內已結束的旅程排前面（那些才是真的還沒去到的）
+  const groups = {};
+  rows.forEach(r => { (groups[r.region] = groups[r.region] || []).push(r); });
+
+  box.innerHTML = Object.keys(groups).map(region => `
+    <section class="find-group">
+      <h3 class="find-region">${esc(region)}<span>${groups[region].length}</span></h3>
+      ${groups[region].map(r => `
+        <div class="find-item">
+          <button class="fi-main" data-jump="${r.trip.id}|${r.day.id}|${r.stop.id}">
+            <span class="fi-name">${TYPE_ICONS[r.stop.type] || '📍'} ${esc(r.stop.name)}
+              ${r.stop.done ? '<span class="pill pill-booked">已完成</span>' : ''}
+              ${r.stop.booked ? '<span class="pill pill-booked">已訂位</span>' : ''}</span>
+            <span class="fi-meta">${esc(r.trip.emoji || '')} ${esc(r.trip.name)}　Day ${r.dayIdx + 1}　${esc(formatDateLabel(r.day.date))}</span>
+            ${r.stop.note ? `<span class="fi-note">${esc(r.stop.note)}</span>` : ''}
+          </button>
+          <button class="fi-add" data-pocket="${r.trip.id}|${r.day.id}|${r.stop.id}"
+                  title="排進另一趟旅程">＋</button>
+        </div>`).join('')}
+    </section>`).join('') +
+    (f.mode === 'pocket' ? `
+      <div class="find-foot">
+        <label class="check"><input type="checkbox" id="incActive" ${f.includeActive ? 'checked' : ''}>
+          連還沒出發的旅程一起看</label>
+      </div>` : '');
+}
+
+/** 從搜尋結果跳到那一筆行程所在的那一天，並讓它閃一下 */
+function jumpToStop(tripId, dayId, stopId) {
+  view.tripId = tripId;
+  DB.activeTripId = tripId;
+  saveDB();
+  view.dayId = dayId;
+  view.chat = [];
+  view.pending = null;
+  view.flashStop = stopId;
+  renderPlan();
+  go('plan');
+  requestAnimationFrame(() => {
+    const el = document.querySelector(`[data-stop="${stopId}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 1800);
+  });
+}
+
+/** 把口袋清單裡的一筆，排進另一趟旅程的某一天 */
+function openPocketPicker(srcTripId, srcDayId, stopId) {
+  const src = getDay(getTrip(srcTripId), srcDayId);
+  const stop = src ? src.stops.find(s => s.id === stopId) : null;
+  if (!stop) return;
+  const others = DB.trips;
+  if (!others.length) { toast('還沒有其他旅程'); return; }
+
+  openSheet(`
+    <h2>排進哪一趟？</h2>
+    <p>把「${esc(stop.name)}」複製到另一趟旅程。原本那筆會留著，只是不再出現在口袋清單。</p>
+    <div class="field"><label>旅程</label><select id="pkTrip">
+      ${others.map(t => `<option value="${t.id}">${esc(t.emoji || '')} ${esc(t.name)}</option>`).join('')}
+    </select></div>
+    <div class="field"><label>哪一天</label><select id="pkDay"></select></div>
+    <div class="sheet-actions">
+      <button class="btn btn-secondary" data-close>取消</button>
+      <button class="btn btn-primary" id="pkGo">排進去</button>
+    </div>
+  `, root => {
+    const tripSel = root.querySelector('#pkTrip');
+    const daySel = root.querySelector('#pkDay');
+    const fillDays = () => {
+      const t = getTrip(tripSel.value);
+      daySel.innerHTML = t.days.map((d, i) =>
+        `<option value="${d.id}">Day ${i + 1}　${esc(formatDateLabel(d.date))}</option>`).join('');
+    };
+    fillDays();
+    tripSel.onchange = fillDays;
+    root.querySelector('[data-close]').onclick = closeSheet;
+    root.querySelector('#pkGo').onclick = () => {
+      copyStopToTrip(srcTripId, srcDayId, stopId, tripSel.value, daySel.value);
+      closeSheet();
+      renderFind(); renderTrips();
+      toast(`已排進「${getTrip(tripSel.value).name}」`);
+    };
+  });
 }
 
 /* ============================================================
@@ -711,6 +885,7 @@ function openStopForm(opts) {
     <div class="field"><div class="check-row">
       <label class="check"><input type="checkbox" id="sBooked" ${s.booked ? 'checked' : ''}> ✅ 已訂位</label>
       <label class="check"><input type="checkbox" id="sAlt" ${s.alt ? 'checked' : ''}> 🔄 備案</label>
+      ${mode === 'db' ? `<label class="check"><input type="checkbox" id="sDone" ${s.done ? 'checked' : ''}> ✓ 已完成</label>` : ''}
     </div></div>
     <div class="sheet-actions">
       <button class="btn btn-secondary" data-close>取消</button>
@@ -733,6 +908,8 @@ function openStopForm(opts) {
         booked: root.querySelector('#sBooked').checked,
         alt: root.querySelector('#sAlt').checked
       };
+      const doneBox = root.querySelector('#sDone');
+      if (doneBox) data.done = doneBox.checked;
 
       if (mode === 'pending') {
         // 只改確認卡上的那一筆，還沒寫進行程；你親手改過，就不再標「待確認」
@@ -810,6 +987,10 @@ function openMenu() {
     <h3>備份你的資料</h3>
     <p>行程存在<strong>這台裝置的瀏覽器</strong>裡。清除瀏覽資料、換手機都會消失，記得定期匯出備份。</p>
     <button class="btn btn-secondary" id="btnExport" style="width:100%">⬇ 匯出備份檔</button>
+    <button class="btn btn-secondary" id="btnCopyAll" style="width:100%; margin-top:8px">📋 複製全部資料到剪貼簿</button>
+    <p class="note">在 iPhone 上，<strong>Safari 開的網頁</strong>和<strong>加到主畫面的 App</strong>
+      是兩個分開的儲存空間，資料不會互通（這是 iOS 的設計，不是壞掉）。<br>
+      要把資料搬過去：在有資料的那邊按「複製全部資料」，到另一邊貼進下面的匯入框。</p>
 
     <h3>匯入資料</h3>
     <p>兩種東西都可以貼進來：<br>
@@ -828,7 +1009,14 @@ function openMenu() {
       <li>時間寫在最前面（<code>19:30 火星咖啡…</code>）才會被當成到訪時間</li>
       <li>寫「已訂位」「備案」會自動標記</li>
       <li>解析難免猜錯，加入前的確認卡上可以逐筆修改</li>
+      <li>寫了日期（<code>10/18</code>）會自動排到那一天，不用再選</li>
+      <li><code>11:40台中出發 12:17到台南</code> 會自動拆成出發、抵達兩筆</li>
     </ul>
+
+    <h3>打勾與口袋清單</h3>
+    <p>行程左邊的 <strong>✓</strong> 是「這次有去成」。旅程結束後<strong>沒打勾</strong>的，
+      會自動收進上方 🔍 的<strong>口袋清單</strong>，依地區分好（台南／台北…），
+      下次規劃時按 ＋ 就能排進新旅程。</p>
 
     <p class="note" style="margin-top:18px; text-align:center">目前版本：${APP_VERSION}</p>
     <div class="sheet-actions"><button class="btn btn-primary" data-close>關閉</button></div>
@@ -839,6 +1027,21 @@ function openMenu() {
     root.querySelector('#btnExport').onclick = () => {
       exportJSON();
       toast('已下載備份檔');
+    };
+
+    // 搬家用：不下載檔案，直接複製成文字，到另一邊貼上就好
+    root.querySelector('#btnCopyAll').onclick = async () => {
+      const text = JSON.stringify({ type: 'backup', version: 2, trips: DB.trips });
+      try {
+        await navigator.clipboard.writeText(text);
+        toast('已複製，到另一邊貼進匯入框');
+      } catch (e) {
+        // 有些瀏覽器不給程式寫剪貼簿 —— 退而求其次，填進匯入框讓她自己全選複製
+        const box = root.querySelector('#importText');
+        box.value = text;
+        box.focus(); box.select();
+        toast('無法自動複製，請長按這個框選「全選 → 拷貝」');
+      }
     };
 
     root.querySelector('#btnImport').onclick = () => {
@@ -859,9 +1062,11 @@ function openMenu() {
 
       // 一批景點 → 丟進確認卡，跟貼文字走同一條路
       if (!currentTrip()) { alert('請先進入一趟旅程，再匯入景點。'); return; }
+      const tripNow = currentTrip();
       const items = res.stops.map(s => Object.assign(
         { time: '待定', note: '', type: 'sight', mapQuery: '', booked: false, alt: false },
-        s, { _on: true }
+        s,
+        { _on: true, _dayId: dayIdForDate(tripNow, s.date ? parseYmdish(s.date) : null) }
       ));
       view.pending = { items };
       closeSheet();
@@ -880,19 +1085,24 @@ function go(screen) {
   $('#scTrips').hidden = screen !== 'trips';
   $('#scPlan').hidden = screen !== 'plan';
   $('#scAdd').hidden = screen !== 'add';
+  $('#scFind').hidden = screen !== 'find';
   $('#composer').hidden = screen !== 'add';
-  $('#tabBar').hidden = screen === 'trips';
+  $('#tabBar').hidden = screen === 'trips' || screen === 'find';
   $('#btnBack').hidden = screen === 'trips';
+  $('#btnFind').hidden = screen === 'find';
   $('#tabPlan').setAttribute('aria-selected', String(screen === 'plan'));
   $('#tabAdd').setAttribute('aria-selected', String(screen === 'add'));
 
   const trip = currentTrip();
   if (screen === 'trips') {
     $('#barTitle').textContent = '我的旅程';
+  } else if (screen === 'find') {
+    $('#barTitle').textContent = '搜尋與口袋清單';
   } else if (trip) {
     $('#barTitle').innerHTML = `${esc(trip.emoji || '')} ${esc(trip.name)}<span class="sub">${esc(formatDateLabel(trip.dateStart))} 起</span>`;
   }
   if (screen === 'add') { renderChat(); setTimeout(autoGrow, 0); }
+  if (screen === 'find') renderFind();
 }
 
 function openTrip(tripId) {
@@ -938,6 +1148,20 @@ $('#dayView').addEventListener('click', e => {
   const trip = currentTrip();
   const day = currentDay();
   if (!trip || !day) return;
+
+  const doneBtn = e.target.closest('[data-done]');
+  if (doneBtn) {
+    const on = toggleDone(trip.id, day.id, doneBtn.getAttribute('data-done'));
+    renderPlan();
+    toast(on ? '打勾了 ✓' : '取消打勾，之後會出現在口袋清單');
+    return;
+  }
+  if (e.target.closest('#btnSortTime')) {
+    sortDayByTime(trip.id, day.id);
+    renderPlan();
+    toast('已依時間排好');
+    return;
+  }
 
   const editStop = e.target.closest('[data-edit-stop]');
   if (editStop) {
@@ -1067,7 +1291,48 @@ window.addEventListener('focus', onReturnFromLookup);
 // 分頁與返回
 $('#tabPlan').onclick = () => go('plan');
 $('#tabAdd').onclick = () => go('add');
-$('#btnBack').onclick = () => { renderTrips(); go('trips'); };
+$('#btnBack').onclick = () => {
+  // 從搜尋頁返回：如果本來就在某趟旅程裡，退回那趟；否則回列表
+  if (view.screen === 'find' && currentTrip()) { renderPlan(); go('plan'); return; }
+  renderTrips(); go('trips');
+};
+$('#btnFind').onclick = () => go('find');
+
+/* --- 搜尋 / 口袋清單頁的操作 --- */
+let findTimer = null;
+$('#findInput').addEventListener('input', e => {
+  view.find.q = e.target.value;
+  // 每打一個字就重畫會卡，等手停下來再畫
+  clearTimeout(findTimer);
+  findTimer = setTimeout(renderFind, 160);
+});
+$('#findMode').addEventListener('click', e => {
+  const b = e.target.closest('[data-m]');
+  if (!b) return;
+  view.find.mode = b.getAttribute('data-m');
+  view.find.region = '全部';
+  $('#findMode').querySelectorAll('button').forEach(x =>
+    x.setAttribute('aria-pressed', String(x === b)));
+  renderFind();
+});
+$('#findRegions').addEventListener('click', e => {
+  const b = e.target.closest('[data-rg]');
+  if (!b) return;
+  view.find.region = b.getAttribute('data-rg');
+  renderFind();
+});
+$('#findList').addEventListener('click', e => {
+  const jump = e.target.closest('[data-jump]');
+  if (jump) { jumpToStop(...jump.getAttribute('data-jump').split('|')); return; }
+  const add = e.target.closest('[data-pocket]');
+  if (add) { openPocketPicker(...add.getAttribute('data-pocket').split('|')); return; }
+});
+$('#findList').addEventListener('change', e => {
+  if (e.target.id !== 'incActive') return;
+  view.find.includeActive = e.target.checked;
+  view.find.region = '全部';
+  renderFind();
+});
 $('#btnMenu').onclick = openMenu;
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;

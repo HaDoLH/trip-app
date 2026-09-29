@@ -288,13 +288,43 @@ function deleteDay(tripId, dayId) {
 
 /* ---------- 景點 CRUD ---------- */
 
+/* ---------- 依時間自動排序 ----------
+   有寫時間的照時間由早到晚排在前面，寫「待定」「下午」這種的沉到最後，
+   而且維持你原本拖曳的順序 —— 這樣拖曳跟自動排序才不會互相打架。 */
+
+/** '19:30' → 1170（分鐘）。不是明確時間的回傳 null */
+function timeMinutes(t) {
+  const m = String(t || '').match(/^\s*(\d{1,2})\s*[:：]\s*(\d{2})\s*$/);
+  if (!m) return null;
+  const h = +m[1], mi = +m[2];
+  if (h > 23 || mi > 59) return null;
+  return h * 60 + mi;
+}
+
+/** 把某一天的行程重新排好 */
+function sortDayByTime(tripId, dayId) {
+  const day = getDay(getTrip(tripId), dayId);
+  if (!day) return false;
+  day.stops = day.stops
+    .map((s, i) => ({ s, i, t: timeMinutes(s.time) }))   // 記住原本的位置，同時間的才不會亂跳
+    .sort((a, b) => {
+      if (a.t === null && b.t === null) return a.i - b.i;   // 都沒時間 → 維持原順序
+      if (a.t === null) return 1;                            // 沒時間的排後面
+      if (b.t === null) return -1;
+      return a.t - b.t || a.i - b.i;
+    })
+    .map(x => x.s);
+  saveDB();
+  return true;
+}
+
 function addStop(tripId, dayId, stopData) {
   const day = getDay(getTrip(tripId), dayId);
   if (!day) return null;
-  const stop = Object.assign({ id: uid(), time: '待定', name: '', note: '', type: 'sight', mapQuery: '', link: '', booked: false, alt: false }, stopData);
+  const stop = Object.assign({ id: uid(), time: '待定', name: '', note: '', type: 'sight', mapQuery: '', link: '', booked: false, alt: false, done: false }, stopData);
   if (!stop.id) stop.id = uid();
   day.stops.push(stop);
-  saveDB();
+  sortDayByTime(tripId, dayId);   // 裡面會存檔
   return stop;
 }
 
@@ -309,15 +339,29 @@ function updateStop(tripId, dayId, stopId, stopData, newDayId) {
   if (newDayId && newDayId !== dayId) {
     const target = getDay(trip, newDayId);
     if (target) {
+      const keep = day.stops[idx];
       day.stops.splice(idx, 1);
-      target.stops.push(Object.assign({}, stopData, { id: stopId }));
-      saveDB();
+      target.stops.push(Object.assign({}, keep, stopData, { id: stopId }));
+      sortDayByTime(tripId, newDayId);
       return { moved: true, dayId: newDayId };
     }
   }
-  day.stops[idx] = Object.assign({}, stopData, { id: stopId });
-  saveDB();
+  // 用 Object.assign 疊在原本那筆上面，表單沒有的欄位（例如 done）才不會被洗掉
+  day.stops[idx] = Object.assign({}, day.stops[idx], stopData, { id: stopId });
+  sortDayByTime(tripId, dayId);
   return { moved: false, dayId };
+}
+
+/** 打勾 / 取消打勾（這次有沒有真的去成） */
+function toggleDone(tripId, dayId, stopId) {
+  const day = getDay(getTrip(tripId), dayId);
+  if (!day) return false;
+  const stop = day.stops.find(s => s.id === stopId);
+  if (!stop) return false;
+  stop.done = !stop.done;
+  if (stop.done) stop.pocketHide = false;   // 去成了就不需要「已排進別趟」的記號
+  saveDB();
+  return stop.done;
 }
 
 function deleteStop(tripId, dayId, stopId) {
@@ -337,6 +381,73 @@ function moveStop(tripId, dayId, from, to) {
   day.stops.splice(Math.max(0, Math.min(to, day.stops.length)), 0, item);
   saveDB();
   return true;
+}
+
+/* ============================================================
+   口袋清單 與 搜尋
+
+   「這次沒去成的」不該隨著旅程結束就被埋起來。
+   這一區把所有旅程裡的行程攤平成一張表，方便搜尋，
+   也方便把沒去成的撈出來、丟進下一趟。
+   ============================================================ */
+
+/** 這筆行程屬於哪個地區：先看地址，沒有就看旅程名稱 */
+function stopRegion(stop, trip) {
+  const fromStop = typeof guessRegion === 'function'
+    ? guessRegion(`${stop.mapQuery || ''} ${stop.note || ''} ${stop.name || ''}`) : '';
+  if (fromStop) return fromStop;
+  const fromTrip = typeof guessRegion === 'function' ? guessRegion(trip.name || '') : '';
+  return fromTrip || '其他';
+}
+
+/** 旅程是不是已經結束了（回程日在今天之前） */
+function tripIsOver(trip) {
+  return !!trip.dateEnd && trip.dateEnd < toYmd(new Date());
+}
+
+/** 把所有旅程的行程攤平成一張表，每筆都帶著它是誰家的 */
+function allStops() {
+  const out = [];
+  DB.trips.forEach(trip => {
+    trip.days.forEach((day, dayIdx) => {
+      day.stops.forEach(stop => {
+        out.push({ stop, trip, day, dayIdx, region: stopRegion(stop, trip), over: tripIsOver(trip) });
+      });
+    });
+  });
+  return out;
+}
+
+/**
+ * 口袋清單：沒打勾（＝沒去成）的行程。
+ * 預設只收已經結束的旅程，那才是真的「這次沒去到」；
+ * includeActive 打開的話，還沒出發的也一起看。
+ */
+function collectPocket(includeActive) {
+  return allStops().filter(r => !r.stop.done && !r.stop.pocketHide && (includeActive || r.over));
+}
+
+/** 搜尋比對：店名、備註、地址、旅程名稱都找。臺／台 視為同一個字 */
+function matchStop(row, keyword) {
+  const k = String(keyword || '').trim().toLowerCase().replace(/臺/g, '台');
+  if (!k) return true;
+  const hay = `${row.stop.name} ${row.stop.note} ${row.stop.mapQuery} ${row.trip.name}`
+    .toLowerCase().replace(/臺/g, '台');
+  return hay.includes(k);
+}
+
+/**
+ * 把一筆行程複製到另一趟旅程。
+ * 原本那筆會標上 pocketHide，從口袋清單消失（但行程紀錄還在，沒有刪掉）。
+ */
+function copyStopToTrip(srcTripId, srcDayId, stopId, dstTripId, dstDayId) {
+  const src = getDay(getTrip(srcTripId), srcDayId);
+  const stop = src ? src.stops.find(s => s.id === stopId) : null;
+  if (!stop) return null;
+  const copy = Object.assign({}, stop, { id: uid(), done: false, pocketHide: false });
+  const added = addStop(dstTripId, dstDayId, copy);
+  if (added) { stop.pocketHide = true; saveDB(); }
+  return added;
 }
 
 /* ---------- 匯出 / 匯入 ----------

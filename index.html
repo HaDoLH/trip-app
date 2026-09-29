@@ -20,6 +20,7 @@
   <header class="bar">
     <button class="icon-btn" id="btnBack" hidden aria-label="回到旅程列表">‹</button>
     <h1 id="barTitle">我的旅程</h1>
+    <button class="icon-btn" id="btnFind" aria-label="搜尋與口袋清單">🔍</button>
     <button class="icon-btn" id="btnMenu" aria-label="設定與說明">☰</button>
   </header>
 
@@ -37,6 +38,19 @@
   <!-- ③ 新增（對話式） -->
   <main class="screen" id="scAdd" hidden>
     <div class="chat" id="chatList"></div>
+  </main>
+
+  <!-- ④ 搜尋 ＋ 口袋清單（跨所有旅程） -->
+  <main class="screen" id="scFind" hidden>
+    <div class="find-head">
+      <input type="search" id="findInput" placeholder="搜尋店名、地址、備註…" autocomplete="off" enterkeyhint="search">
+      <div class="seg-find" id="findMode">
+        <button type="button" data-m="pocket" aria-pressed="true">口袋清單</button>
+        <button type="button" data-m="all" aria-pressed="false">全部行程</button>
+      </div>
+      <div class="find-regions" id="findRegions"></div>
+    </div>
+    <div id="findList"></div>
   </main>
 
   <!-- 輸入區（只在「新增」分頁出現） -->

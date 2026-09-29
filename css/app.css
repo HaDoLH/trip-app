@@ -505,3 +505,81 @@ body{
   max-width:88%; text-align:center;
 }
 .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+
+/* ===========================================================
+   完成打勾（行程列左側）
+   =========================================================== */
+.stop-check{
+  flex:0 0 26px; align-self:flex-start; margin-top:9px;
+  width:19px; height:19px; padding:0; border-radius:50%;
+  border:1.5px solid var(--line); background:var(--surface);
+  color:transparent; font-size:11px; line-height:1;
+  display:grid; place-items:center; cursor:pointer; font-family:inherit;
+}
+.stop-check:hover{border-color:var(--ok); color:var(--ink-3)}
+.stop-check[aria-checked="true"]{background:var(--ok); border-color:var(--ok); color:#fff}
+/* 打勾後整列變淡、店名劃掉 —— 一眼看得出哪些去過了 */
+.stop-done{opacity:.55}
+.stop-done .stop-name .txt{text-decoration:line-through}
+/* 從搜尋跳過來時閃一下，指出是哪一筆 */
+@keyframes flash-row{0%,100%{background:var(--surface)} 30%{background:var(--ok-soft)}}
+.stop.flash{animation:flash-row 1.6s ease}
+
+.pill-day{background:var(--surface-2); color:var(--ink-2); border:1px solid var(--line)}
+
+/* ===========================================================
+   搜尋 ＋ 口袋清單
+   =========================================================== */
+.find-head{
+  position:sticky; top:0; z-index:2;
+  padding:12px 14px 10px; background:var(--ground);
+  border-bottom:1px solid var(--line);
+  display:flex; flex-direction:column; gap:9px;
+}
+/* 16px 是底線：iOS Safari 一碰到更小的字就會把整頁放大 */
+#findInput{
+  width:100%; font:inherit; font-size:16px; padding:10px 13px;
+  border:1px solid var(--line); border-radius:var(--r-sm);
+  background:var(--surface); color:var(--ink); -webkit-appearance:none;
+}
+#findInput:focus{outline:none; border-color:var(--ok)}
+.seg-find{display:flex; gap:0; border:1px solid var(--line); border-radius:999px; overflow:hidden}
+.seg-find button{
+  flex:1; border:none; background:var(--surface); color:var(--ink-2);
+  font:inherit; font-size:12.5px; padding:7px 0; cursor:pointer;
+}
+.seg-find button[aria-pressed="true"]{background:var(--ink); color:var(--surface)}
+.find-regions{display:flex; gap:6px; overflow-x:auto; padding-bottom:2px; scrollbar-width:none}
+.find-regions::-webkit-scrollbar{display:none}
+.rg{
+  flex:0 0 auto; border:1px solid var(--line); background:var(--surface);
+  color:var(--ink-2); font:inherit; font-size:11.5px; padding:5px 12px;
+  border-radius:999px; cursor:pointer; white-space:nowrap;
+}
+.rg[aria-pressed="true"]{background:var(--ink); color:var(--surface); border-color:var(--ink)}
+
+.find-group{padding:0 0 4px}
+.find-region{
+  margin:0; padding:12px 14px 6px; font-size:12px; font-weight:700;
+  color:var(--ink-2); display:flex; align-items:baseline; gap:8px;
+}
+.find-region span{font-weight:400; color:var(--ink-3); font-size:11px}
+.find-item{display:flex; background:var(--surface); border-top:1px solid var(--line)}
+.fi-main{
+  flex:1; min-width:0; text-align:left; border:none; background:transparent;
+  font:inherit; color:inherit; cursor:pointer; padding:11px 8px 11px 14px;
+  display:flex; flex-direction:column; gap:3px;
+}
+.fi-main:hover{background:var(--surface-2)}
+.fi-name{font-size:13.5px; font-weight:600; word-break:break-word; display:flex; align-items:center; gap:6px; flex-wrap:wrap}
+.fi-meta{font-size:11px; color:var(--ink-3)}
+.fi-note{
+  font-size:11px; color:var(--ink-2); line-height:1.55;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+}
+.fi-add{
+  flex:0 0 auto; border:none; background:transparent; color:var(--ink-3);
+  font-size:18px; padding:0 14px; cursor:pointer; font-family:inherit;
+}
+.fi-add:hover{color:var(--ok)}
+.find-foot{padding:16px 14px calc(28px + env(safe-area-inset-bottom)); color:var(--ink-2); font-size:12.5px}

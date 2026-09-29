@@ -27,6 +27,15 @@ const RE_LEAD_SYMBOL = /^(?:\s|\*|＊|📍|📌|•|・|※|>)+/;
 
 // 營業時間：時段區間（12:00–21:00、12–21:00、11:00-14:30）
 const RE_HOURS_RANGE = /(\d{1,2}(?::\d{2})?\s*[–\-~～至到]\s*\d{1,2}(?::\d{2})?)/g;
+
+/* 日期區間：08/01-11/15、8/1～11/15、10月3日－10月5日
+   這條一定要先認出來把位置佔住，否則「展覽期間 08/01-11/15」裡面的
+   「01-11」會被上面那條當成營業時間挖走，整段備註就散掉了。 */
+const RE_DATE_RANGE = /(\d{1,2}\s*[\/月]\s*\d{1,2}\s*日?\s*[–\-~～至到]\s*\d{1,2}\s*[\/月]\s*\d{1,2}\s*日?)/g;
+// 單一日期：10/18、10月18日、10/18(六)。後面不能接冒號或數字，才不會把 10:30 誤認成日期
+const RE_DATE_ONE = /(?:^|[\s(（【\[、，,])(\d{1,2})\s*[\/月]\s*(\d{1,2})\s*日?(?![:：\d])/g;
+// 這些字後面的日期是「展期、活動期間」，不是你要去的那天
+const RE_PERIOD_WORD = /(展期|展覽期間|期間限定|期間|活動|檔期|限定)\s*$/;
 // 營業時間：星期（週四–日、週一公休、每週二三公休、週二定休）
 const RE_WEEKDAYS = /((?:每)?(?:週|周|星期|禮拜)\s*[一二三四五六日天]+(?:\s*[–\-~～至到]\s*(?:週|周|星期|禮拜)?\s*[一二三四五六日天]+)?(?:\s*(?:公休|店休|定休|休))?)/g;
 const RE_CLOSED = /((?:公休|店休|定休|不定期休|無公休)日?)/g;
@@ -41,6 +50,9 @@ const RE_PERIOD = /(凌晨|清晨|早上|上午|中午|下午|傍晚|晚上|深�
 
 // 常見的欄位標籤，解析前先拆掉
 const RE_LABELS = /(?:店名|名稱|地址|位置|地點|營業時間|時間|電話|聯絡|備註|價位|公休)\s*[:：]\s*/g;
+/* 沒有冒號、直接黏著內容的標籤：「營業時間08:00-16:00」「電話06-2086946」。
+   要限定後面緊接著數字，否則「時間」兩個字在任何句子裡都會被拆掉。 */
+const RE_LABELS_BARE = /(?:營業時間|營業|公休日|聯絡電話|電話|地址)(?=\s*[\d０-９])/g;
 
 // 「已訂位」「備案」這類狀態標記
 const RE_BOOKED = /(已訂位|已預約|已預訂|已訂|訂位完成)/;
@@ -247,6 +259,77 @@ function splitEntries(raw) {
 }
 
 /* ============================================================
+   二之〇、日期與交通
+   ============================================================ */
+
+/**
+ * 找出「你要去的那一天」。
+ * 只認單獨出現的日期（10/18、10月18日），跳過兩種假日期：
+ *   ① 日期區間裡的（08/01-11/15 是展期，不是你要去的日子）
+ *   ② 前面寫著「展期」「期間限定」的
+ * 回傳 { month, day } 或 null。
+ */
+function findVisitDate(text) {
+  const src = String(text || '');
+  const blocked = [];
+  RE_DATE_RANGE.lastIndex = 0;
+  let r;
+  while ((r = RE_DATE_RANGE.exec(src)) !== null) blocked.push([r.index, r.index + r[0].length]);
+
+  RE_DATE_ONE.lastIndex = 0;
+  let m;
+  while ((m = RE_DATE_ONE.exec(src)) !== null) {
+    const at = m.index;
+    if (blocked.some(([s, e]) => at >= s && at < e)) continue;
+    if (RE_PERIOD_WORD.test(src.slice(Math.max(0, at - 8), at + 1))) continue;
+    const month = +m[1], day = +m[2];
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) return { month, day };
+  }
+  return null;
+}
+
+/* 交通：同一句話裡同時寫了「幾點從哪出發」和「幾點到哪」，
+   例如「高鐵時間 11:40台中出發 12:17到台南高鐵站」。
+   這種其實是兩件事（出發、抵達），拆成兩筆才排得進當天的時間軸。 */
+const RE_DEPART = /(\d{1,2}\s*[:：]\s*\d{2})\s*([^\s，,。、；;（(]{0,12}?)\s*(?:出發|發車|開車|起飛|上車)/;
+const RE_ARRIVE = /(\d{1,2}\s*[:：]\s*\d{2})\s*(?:抵達|到達|到)\s*([^\s，,。、；;）)]{1,14})/;
+
+/** 補上車站種類：「台中」→「台中高鐵站」，已經有站名的就不動 */
+function stationName(raw, hint) {
+  const t = tidy(raw);
+  if (!t) return '';
+  return (hint && !/站|機場|港|碼頭/.test(t)) ? t + hint : t;
+}
+
+/**
+ * 一筆行程如果是「出發＋抵達」，拆成兩筆；不是就原樣回傳。
+ * 出發地常常在別的縣市，所以這裡不套用 cityHint。
+ */
+function expandTransit(stop) {
+  const src = stop._raw || '';
+  const dep = src.match(RE_DEPART);
+  const arr = src.match(RE_ARRIVE);
+  if (!dep || !arr) return [stop];
+
+  const hint = /高鐵/.test(src) ? '高鐵站'
+    : (/台鐵|臺鐵|火車|區間車|自強/.test(src) ? '火車站'
+      : (/機場|班機|飛機/.test(src) ? '機場' : ''));
+  const from = stationName(dep[2], hint);
+  const to = stationName(arr[2], hint);
+  if (!from || !to) return [stop];
+
+  // 時間前面那段字（例如「高鐵時間」）留著當備註
+  const label = tidy(src.slice(0, Math.min(dep.index, arr.index)).replace(/時間$/, ''));
+  const mk = (clock, place, verb) => ({
+    time: normalizeTime(clock), name: `${place} ${verb}`, note: label,
+    link: stop.link || '', type: 'transit', mapQuery: place,
+    booked: !!stop.booked, alt: !!stop.alt,
+    _raw: src, _address: '', _nameUnsure: false, _handle: '', _date: stop._date || null
+  });
+  return [mk(dep[1], from, '出發'), mk(arr[1], to, '抵達')];
+}
+
+/* ============================================================
    二、解析單一筆
    ============================================================ */
 
@@ -271,7 +354,8 @@ function parseEntry(raw, cityHint = '') {
 
   // --- 0. 先清雜訊：追蹤數、按鈕文字 ---
   let work = original.split('\n').map(cleanNoise).filter(Boolean).join('\n');
-  work = work.replace(RE_LABELS, ' ');   // 拆掉「店名：」「地址：」這類標籤
+  work = work.replace(RE_LABELS, ' ')    // 拆掉「店名：」「地址：」這類標籤
+             .replace(RE_LABELS_BARE, ' ');   // 以及沒冒號的「營業時間08:00」
 
   // 分享連結先抽走（要在抓帳號之前，不然網址裡的文字會被誤判）
   //     連結存成獨立欄位，行程上就能直接點開原始貼文
@@ -304,14 +388,23 @@ function parseEntry(raw, cityHint = '') {
   // --- 3. 營業時間（要先抽走，否則 12:00–21:00 會被誤認成「到訪時間」）---
   //     三種規則各找各的，但最後要照「原文出現的順序」排回去，
   //     不然「週一 08:00-18:00（週二定休）」會變成「週一 週二定休 08:00-18:00」，意思就錯了
+  //     另外先把「日期區間」的位置圈起來擋住（展期 08/01-11/15），
+  //     它本身要留在原文裡當備註，只是不准營業時間的規則來咬它
+  const visitDate = findVisitDate(work);
+  const blocked = [];
+  RE_DATE_RANGE.lastIndex = 0;
+  let dm;
+  while ((dm = RE_DATE_RANGE.exec(work)) !== null) blocked.push({ start: dm.index, end: dm.index + dm[0].length });
+
   const spans = [];
   [RE_WEEKDAYS, RE_HOURS_RANGE, RE_CLOSED].forEach(re => {
     re.lastIndex = 0;
     let m;
     while ((m = re.exec(work)) !== null) {
       const start = m.index, end = m.index + m[0].length;
-      // 已經被別的規則抓過的範圍就跳過（例如「週一公休」的「公休」）
-      if (!spans.some(sp => start < sp.end && end > sp.start)) spans.push({ start, end, text: m[0].trim() });
+      const hits = sp => start < sp.end && end > sp.start;
+      // 已經被別的規則抓過、或落在日期區間裡的就跳過（例如「週一公休」的「公休」）
+      if (!spans.some(hits) && !blocked.some(hits)) spans.push({ start, end, text: m[0].trim() });
       if (m[0].length === 0) re.lastIndex++;
     }
   });
@@ -363,6 +456,8 @@ function parseEntry(raw, cityHint = '') {
     .replace(RE_ALT, '')
     .replace(RE_LEAD_SYMBOL, '')
     .replace(/^\s*(?:[-–—*+・‧•]|\d+[.)、])\s*/, '')   // 條列符號
+    // 開頭的日期已經被收進 _date 了，留在店名裡只是雜訊
+    .replace(/^\s*\d{1,2}\s*[\/月]\s*\d{1,2}\s*日?\s*(?:[（(][一二三四五六日天][)）])?\s*/, '')
     .trim();
   if (name.length > 40) name = name.slice(0, 40);
 
@@ -422,15 +517,19 @@ function parseEntry(raw, cityHint = '') {
     _raw: original,
     _address: address,
     _nameUnsure: nameUnsure,
-    _handle: nameHandle
+    _handle: nameHandle,
+    _date: visitDate          // 文字裡寫了日期的話，確認卡會自動幫你選好是哪一天
   };
 }
 
 /** 主要入口：一段文字 → 一批 stop */
 function parseText(raw, cityHint = '') {
-  return splitEntries(raw)
+  const out = [];
+  splitEntries(raw)
     .map(entry => parseEntry(entry, cityHint))
-    .filter(s => s.name && s.name.length >= 1);
+    .filter(s => s.name && s.name.length >= 1)
+    .forEach(s => out.push(...expandTransit(s)));   // 出發＋抵達的拆成兩筆
+  return out;
 }
 
 /**
@@ -443,4 +542,23 @@ function guessCity(tripName) {
     '東京', '大阪', '京都', '奈良', '神戶', '名古屋', '福岡', '北海道', '札幌', '沖繩', '首爾', '釜山', '曼谷', '新加坡', '香港', '澳門'];
   const hit = known.find(c => tripName.includes(c));
   return hit || '';
+}
+
+/* ---------- 地區分類（口袋清單用） ----------
+   同一個地方在資料裡可能寫「臺南」也可能寫「台南」，
+   統一成「台南」才不會分成兩堆。 */
+const REGION_NAMES = [
+  '台北', '新北', '基隆', '桃園', '新竹', '苗栗', '台中', '彰化', '南投', '雲林',
+  '嘉義', '台南', '高雄', '屏東', '宜蘭', '花蓮', '台東', '澎湖', '金門', '馬祖',
+  '東京', '大阪', '京都', '奈良', '神戶', '名古屋', '福岡', '北海道', '札幌', '沖繩',
+  '首爾', '釜山', '曼谷', '新加坡', '香港', '澳門'
+];
+
+/**
+ * 從一段文字（地址、備註、旅程名）判斷屬於哪個地區。
+ * 找不到就回傳空字串，由呼叫的人決定要不要歸到「其他」。
+ */
+function guessRegion(text) {
+  const t = String(text || '').replace(/臺/g, '台');
+  return REGION_NAMES.find(r => t.includes(r)) || '';
 }
