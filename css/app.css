@@ -602,3 +602,24 @@ body{
   font:inherit; font-size:11.5px; padding:4px 12px; border-radius:999px; cursor:pointer;
 }
 .hint-bar button:hover{background:rgba(180,83,9,.12)}
+
+/* ===========================================================
+   跨裝置同步
+   =========================================================== */
+.icon-btn.sync-on{color:var(--ok)}
+.icon-btn.sync-connecting{color:var(--ink-3)}
+.icon-btn.sync-error{color:var(--danger)}
+.sync-state{
+  margin:0 0 10px; font-size:12.5px; font-weight:600;
+  display:flex; align-items:baseline; gap:6px;
+}
+.sync-state.sync-on{color:var(--ok)}
+.sync-state.sync-connecting{color:var(--ink-2)}
+.sync-state.sync-error{color:var(--danger); font-weight:400; line-height:1.6}
+.sync-actions{display:flex; gap:8px; flex-wrap:wrap; margin-top:4px}
+.sync-actions .btn{flex:0 0 auto}
+/* 代碼是一串英數，等寬字看得比較清楚（分得出 0 和 O） */
+#syncCode, #syncCodeShow{
+  font-family:ui-monospace,"SFMono-Regular",Menlo,monospace; letter-spacing:.02em;
+}
+#syncCodeShow{color:var(--ink-2); background:var(--surface-2)}

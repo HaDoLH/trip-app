@@ -119,6 +119,8 @@ let DB = { version: 2, activeTripId: null, trips: [] };
 function saveDB() {
   const ok = safeStorage.set(STORE_KEY, JSON.stringify(DB));
   if (!ok) console.warn('存檔失敗：瀏覽器不允許寫入 localStorage');
+  // 有開跨裝置同步的話，順便把改動送上雲端（沒開就什麼都不會發生）
+  if (typeof syncQueuePush === 'function') syncQueuePush();
   return ok;
 }
 

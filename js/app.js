@@ -10,7 +10,7 @@ const TYPE_NAMES = { food: '餐廳', cafe: '咖啡 / 飲料', sight: '景點', s
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
 // 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
-const APP_VERSION = 'v14';
+const APP_VERSION = 'v15';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)
@@ -1007,6 +1007,9 @@ function openMenu() {
       <button type="button" data-t="dark" aria-pressed="${theme === 'dark'}">深色</button>
     </div>
 
+    <h3>跨裝置同步</h3>
+    <div id="syncBox"></div>
+
     <h3>備份你的資料</h3>
     <p>行程存在<strong>這台裝置的瀏覽器</strong>裡。清除瀏覽資料、換手機都會消失，記得定期匯出備份。</p>
     <button class="btn btn-secondary" id="btnExport" style="width:100%">⬇ 匯出備份檔</button>
@@ -1046,6 +1049,7 @@ function openMenu() {
   `, root => {
     root.querySelector('[data-close]').onclick = closeSheet;
     bindPick(root, '#themePick', 'data-t', v => { setTheme(v); });
+    renderSyncBox();
 
     root.querySelector('#btnExport').onclick = () => {
       exportJSON();
@@ -1099,6 +1103,109 @@ function openMenu() {
     };
   });
 }
+
+/* ============================================================
+   四之二、跨裝置同步的介面
+
+   同步本身在 sync.js，這裡只管「看起來怎麼樣、按下去做什麼」。
+   ============================================================ */
+
+const SYNC_LABEL = {
+  off: '未開啟', connecting: '連線中…', on: '同步中', error: '連線有問題'
+};
+
+/** 標題列那朵雲：一眼看得出現在是不是連著的 */
+function renderSyncBadge() {
+  const btn = $('#btnSync');
+  btn.hidden = sync.state === 'off';
+  btn.textContent = sync.state === 'on' ? '☁' : (sync.state === 'connecting' ? '⟳' : '⚠');
+  btn.className = 'icon-btn sync-' + sync.state;
+  btn.setAttribute('aria-label', '同步狀態：' + SYNC_LABEL[sync.state]);
+}
+
+/** 設定面板裡那一塊（面板沒開就什麼都不用做） */
+function renderSyncBox() {
+  const box = document.querySelector('#syncBox');
+  if (!box) return;
+
+  if (sync.state === 'off') {
+    box.innerHTML = `
+      <p>開啟之後，手機、電腦、主畫面 App 看到的會是<strong>同一份資料</strong>，改了馬上同步。
+         代碼就是鑰匙，打同一組代碼的人看到同一份資料，所以<strong>不要公開貼出去</strong>。</p>
+      <div class="field">
+        <label>同步代碼</label>
+        <input type="text" id="syncCode" placeholder="至少 8 個字，英數與 - _"
+               autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="text">
+      </div>
+      <div class="sync-actions">
+        <button class="btn btn-primary" id="syncGo" style="flex:1">開始同步</button>
+        <button class="btn btn-secondary" id="syncGen">幫我產一組</button>
+      </div>
+      <p class="note">第一次開：這台的旅程會被上傳。之後在另一台打同一組代碼，就會全部出現。</p>`;
+  } else {
+    const err = sync.state === 'error';
+    box.innerHTML = `
+      <p class="sync-state sync-${sync.state}">${err ? '⚠' : (sync.state === 'on' ? '☁' : '⟳')}
+         ${esc(SYNC_LABEL[sync.state])}${sync.message ? '：' + esc(sync.message) : ''}</p>
+      <div class="field">
+        <label>目前的同步代碼</label>
+        <input type="text" id="syncCodeShow" value="${esc(sync.code || '')}" readonly>
+      </div>
+      <div class="sync-actions">
+        <button class="btn btn-secondary" id="syncShare" style="flex:1">🔗 複製同步連結</button>
+        <button class="btn btn-secondary" id="syncOff">停止同步</button>
+      </div>
+      <p class="note">把連結傳給同行的人，他點開就會看到同一份行程，也可以一起編輯。<br>
+        停止同步只是這台不再連線，<strong>資料會留著</strong>，雲端那份也不會刪。</p>`;
+  }
+
+  // --- 綁事件 ---
+  const go = box.querySelector('#syncGo');
+  if (go) {
+    const input = box.querySelector('#syncCode');
+    go.onclick = async () => {
+      go.disabled = true;
+      const ok = await syncConnect(input.value);
+      go.disabled = false;
+      toast(ok ? '連上了，正在同步' : (sync.message || '連線失敗'));
+    };
+    box.querySelector('#syncGen').onclick = () => {
+      input.value = syncMakeCode();
+      input.focus();
+      toast('產好了，記得抄下來或等一下複製連結');
+    };
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') go.click(); });
+  }
+
+  const share = box.querySelector('#syncShare');
+  if (share) {
+    share.onclick = async () => {
+      const url = syncShareUrl();
+      try {
+        await navigator.clipboard.writeText(url);
+        toast('連結複製好了');
+      } catch (e) {
+        // 擋了剪貼簿就退回「選起來讓你自己複製」
+        const show = box.querySelector('#syncCodeShow');
+        show.value = url; show.focus(); show.select();
+        toast('請長按選「拷貝」');
+      }
+    };
+    box.querySelector('#syncOff').onclick = () => {
+      if (!confirm('停止同步？這台的資料會留著，只是不再跟其他裝置互通。')) return;
+      syncDisconnect(true);
+      toast('已停止同步');
+    };
+  }
+}
+
+/* 同步層的兩個回呼：狀態變了更新介面、雲端資料變了重畫 */
+sync.onState = () => { renderSyncBadge(); renderSyncBox(); };
+sync.onRemote = () => {
+  renderTrips();
+  if (view.screen === 'plan') renderPlan();
+  if (view.screen === 'find') renderFind();
+};
 
 /* ============================================================
    五、畫面切換
@@ -1379,6 +1486,10 @@ loadDB();
 setTheme(getTheme());
 renderTrips();
 go('trips');
+
+// 之前設過同步代碼（或網址帶著 ?c=）就自動接回去
+$('#btnSync').onclick = openMenu;
+syncAutoStart();
 
 /* 註冊 Service Worker：出門沒網路也打得開。
    路徑一定要用相對路徑 —— GitHub Pages 放在 /trip-app/ 子目錄下，
