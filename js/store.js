@@ -523,6 +523,9 @@ function parseImportText(text) {
     if (!trips.length) return { kind: 'error', error: '這份備份裡沒有任何旅程。' };
     return { kind: 'backup', trips };
   }
+  if (data.type === 'trip' && data.trip && Array.isArray(data.trip.days)) {
+    return { kind: 'trip', trip: data.trip };
+  }
   if (data.type === 'stops' || Array.isArray(data.stops)) {
     const stops = (data.stops || []).filter(s => s && s.name);
     if (!stops.length) return { kind: 'error', error: '這段資料裡沒有任何景點。' };
@@ -530,6 +533,19 @@ function parseImportText(text) {
   }
   if (data.name && data.days) return { kind: 'backup', trips: [data] };
   return { kind: 'error', error: '看不懂這段資料的格式。可以把它丟給 Claude Code，請它轉成正確格式。' };
+}
+
+/**
+ * 用新版本取代某一趟旅程（給「請 Claude 幫我排順序」用）。
+ * 只動這一趟，其他旅程完全不受影響 —— 比整包還原安全得多。
+ * 找不到同一個 id 就當作新旅程加進來。
+ */
+function importTrip(trip) {
+  const i = DB.trips.findIndex(t => t.id === trip.id);
+  const safe = Object.assign({ id: uid('trip'), emoji: '✈️', color: '#C05020' }, trip);
+  if (i < 0) DB.trips.push(safe); else DB.trips[i] = safe;
+  saveDB();
+  return safe;
 }
 
 /** 還原整包備份（會覆蓋現有資料，呼叫前務必先確認） */

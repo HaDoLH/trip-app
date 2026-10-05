@@ -10,7 +10,7 @@ const TYPE_NAMES = { food: '餐廳', cafe: '咖啡 / 飲料', sight: '景點', s
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
 // 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
-const APP_VERSION = 'v15';
+const APP_VERSION = 'v16';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)
@@ -1025,6 +1025,13 @@ function openMenu() {
     <div class="field"><textarea id="importText" class="tall" placeholder='把 JSON 整段貼進來，開頭是 { 結尾是 }'></textarea></div>
     <button class="btn btn-secondary" id="btnImport" style="width:100%">貼上並匯入</button>
 
+    <h3>請 Claude 幫我排順序</h3>
+    <p>App 自己排不出來（它不知道每家店在哪、也看不懂「賣完就收」）。
+      按下面這顆，會把<strong>說明和這趟的資料一起複製</strong>，
+      貼進 Claude App 問它就好；它回你的那段 JSON 再貼回上面的匯入框。</p>
+    <button class="btn btn-secondary" id="btnPlanPrompt" style="width:100%">🤖 複製「幫我排順序」給 Claude</button>
+    <p class="note">只會換掉這一趟，其他旅程不受影響。</p>
+
     <h3>截圖怎麼變成行程？</h3>
     <p>在 Claude Code 把截圖丟給它，說「<code>加行程</code>」，它會回你一段資料，複製後貼到上面的匯入框即可。</p>
 
@@ -1071,12 +1078,27 @@ function openMenu() {
       }
     };
 
+    root.querySelector('#btnPlanPrompt').onclick = copyPlanPrompt;
+
     root.querySelector('#btnImport').onclick = () => {
       const text = root.querySelector('#importText').value.trim();
       if (!text) { toast('請先貼上資料'); return; }
       const res = parseImportText(text);
 
       if (res.kind === 'error') { alert(res.error); return; }
+
+      if (res.kind === 'trip') {
+        const old = getTrip(res.trip.id);
+        const what = old ? `用新版本取代「${old.name}」這一趟` : `新增「${res.trip.name}」這一趟`;
+        if (!confirm(`${what}。\n其他旅程不受影響，確定嗎？`)) return;
+        const t = importTrip(res.trip);
+        closeSheet();
+        view.tripId = t.id;
+        view.dayId = t.days[0] ? t.days[0].id : null;
+        renderTrips(); renderPlan(); go('plan');
+        toast('已更新這趟行程');
+        return;
+      }
 
       if (res.kind === 'backup') {
         if (!confirm(`這是一份完整備份（${res.trips.length} 趟旅程）。\n匯入會覆蓋現在全部資料，確定嗎？`)) return;
@@ -1102,6 +1124,46 @@ function openMenu() {
       pushMsg({ role: 'bot', card: view.pending });
     };
   });
+}
+
+/* ---------- 請 Claude 幫忙排順序 ----------
+   App 自己排不出順序：它沒有每家店的座標，也看不懂「賣完就收」這種話。
+   但這些資訊其實都在備註裡，交給 Claude 讀最快。
+   這裡做的事很單純：把「要怎麼排」的說明和這趟的資料一起複製起來，
+   在手機上貼進 Claude App 就好，不用自己打一長串。 */
+const PLAN_PROMPT = `我在用一個行程 App，想請你幫我排這趟旅程的順序。
+
+排的時候請考慮：
+1. 公休日最優先 —— 備註裡的「週二休」「週一定休」要對照那天是週幾，不要排在公休日
+2. 營業時間 —— 「15:00-售完」「13:00-甜點售完」這種要排早一點，太晚去就沒了
+3. 同一區的串在一起（看 mapQuery 裡的地址），不要一天來回跑
+4. 正餐排 11:30-13:30、18:00-20:00，咖啡甜點和逛街塞中間
+5. booked 是 true 的先固定住，其他繞著它排
+6. alt 是 true 的是備案，排在那天最後面就好
+
+請把每一筆放到合適的那一天，並填上 time（24 小時制，例如 "09:30"）。
+除了 time 和「放在哪一天」之外，其他欄位（id、name、note、mapQuery、link、booked、alt、done）
+請原封不動，不要改字、不要刪、不要自己補沒寫過的資訊。
+
+最後用一個 json 程式碼區塊輸出完整結果，格式跟我貼給你的一模一樣
+（最外層是 {"type":"trip","trip":{...}}），我要整段複製貼回 App。
+JSON 之外再用幾句話說明你為什麼這樣排，還有哪些地方要我自己確認。
+
+以下是我的行程資料：`;
+
+/** 這趟的資料 + 提示詞，一起複製 */
+async function copyPlanPrompt() {
+  const trip = currentTrip() || DB.trips[0];
+  if (!trip) { toast('還沒有任何旅程'); return; }
+  const text = PLAN_PROMPT + '\n\n' + JSON.stringify({ type: 'trip', trip }, null, 1);
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(`已複製「${trip.name}」，貼進 Claude App 就好`);
+  } catch (e) {
+    const box = document.querySelector('#importText');
+    if (box) { box.value = text; box.focus(); box.select(); }
+    toast('無法自動複製，請長按這個框選「全選 → 拷貝」');
+  }
 }
 
 /* ============================================================
