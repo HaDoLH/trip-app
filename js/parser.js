@@ -267,7 +267,7 @@ function splitEntries(raw) {
  * 只認單獨出現的日期（10/18、10月18日），跳過兩種假日期：
  *   ① 日期區間裡的（08/01-11/15 是展期，不是你要去的日子）
  *   ② 前面寫著「展期」「期間限定」的
- * 回傳 { month, day } 或 null。
+ * 回傳 { month, day, start, end }（start/end 是它在原文裡的位置）或 null。
  */
 function findVisitDate(text) {
   const src = String(text || '');
@@ -283,7 +283,9 @@ function findVisitDate(text) {
     if (blocked.some(([s, e]) => at >= s && at < e)) continue;
     if (RE_PERIOD_WORD.test(src.slice(Math.max(0, at - 8), at + 1))) continue;
     const month = +m[1], day = +m[2];
-    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) return { month, day };
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return { month, day, start: at, end: at + m[0].length };
+    }
   }
   return null;
 }
@@ -413,6 +415,13 @@ function parseEntry(raw, cityHint = '') {
   //     另外先把「日期區間」的位置圈起來擋住（展期 08/01-11/15），
   //     它本身要留在原文裡當備註，只是不准營業時間的規則來咬它
   const visitDate = findVisitDate(work);
+  /* 日期寫在最前面（「10/17 13:30 禧榕軒飯店」）的話，把它拿掉。
+     日期已經收進 _date 了，留著只會擋住下一步 —— 下一步只認「開頭」的時間，
+     前面卡一個 10/17，13:30 就變成店名的一部分了。 */
+  if (visitDate && visitDate.start <= 2) {
+    work = work.slice(visitDate.end).replace(/^[\s,，、.．\-–~～]+/, '');
+  }
+
   const blocked = [];
   RE_DATE_RANGE.lastIndex = 0;
   let dm;
