@@ -54,6 +54,17 @@ const RE_LABELS = /(?:店名|名稱|地址|位置|地點|營業時間|時間|電
    要限定後面緊接著數字，否則「時間」兩個字在任何句子裡都會被拆掉。 */
 const RE_LABELS_BARE = /(?:營業時間|營業|公休日|聯絡電話|電話|地址)(?=\s*[\d０-９])/g;
 
+/* 「要做的事」不是地點名稱。
+   「禧榕軒大飯店辦理入住」拿去 Google 找，會因為多了「辦理入住」而找不到飯店，
+   所以組搜尋詞時把這些字拿掉 —— 但店名本身留著，因為那是你要提醒自己做的事。 */
+const RE_ACTION = /\s*(?:辦理入住|辦入住|辦理退房|退房|入住|check\s*-?\s*in|check\s*-?\s*out|寄放行李|寄行李|取票|領票|報到|集合|取車|還車|拿行李)\s*/gi;
+
+/** 把店名洗成適合丟進 Google Maps 的樣子 */
+function nameForMap(name) {
+  const t = String(name || '').replace(RE_ACTION, ' ').replace(/\s{2,}/g, ' ').trim();
+  return t || String(name || '').trim();   // 整個名字都是動作詞的話，還是用原名
+}
+
 // 「已訂位」「備案」這類狀態標記
 const RE_BOOKED = /(已訂位|已預約|已預訂|已訂|訂位完成)/;
 const RE_ALT = /(備案|替代方案|候補|plan\s*b|第二選擇)/i;
@@ -524,12 +535,13 @@ function parseEntry(raw, cityHint = '') {
   //     （note 要等這裡算完才能組好，因為要確認地址真的有被帶進搜尋詞）
   //     店名是猜的（例如帳號）就只用地址，帶著奇怪的字 Google 反而找不到
   let mapQuery = '';
+  const mapName = nameForMap(name);
   if (address) {
     const hasCity = /(市|縣)/.test(address.slice(0, 6));   // 沒寫縣市就補上，免得找到別縣市的同名路
     const base = (hasCity ? '' : cityHint) + address;
-    mapQuery = (nameUnsure ? base : base + ' ' + name).trim();
+    mapQuery = (nameUnsure ? base : base + ' ' + mapName).trim();
   } else {
-    mapQuery = ((cityHint ? cityHint + ' ' : '') + name).trim();
+    mapQuery = ((cityHint ? cityHint + ' ' : '') + mapName).trim();
   }
 
   // 萬一地址沒被帶進搜尋詞，還是要留在備註裡，不然地址就整個不見了
@@ -589,6 +601,21 @@ const REGION_NAMES = [
  * 從一段文字（地址、備註、旅程名）判斷屬於哪個地區。
  * 找不到就回傳空字串，由呼叫的人決定要不要歸到「其他」。
  */
+/**
+ * 重算 Google Maps 搜尋詞：沿用原本找得到的地址 + 現在的店名。
+ * 改了店名之後，舊的搜尋詞會留著舊名字，用這個補回來。
+ */
+function buildMapQuery(name, note, oldQuery, cityHint) {
+  const found = findAddress(String(oldQuery || '')) || findAddress(String(note || ''));
+  const addr = found ? found[1].replace(/\s+/g, '') : '';
+  const clean = nameForMap(name);
+  if (addr) {
+    const hasCity = /(市|縣)/.test(addr.slice(0, 6));
+    return ((hasCity ? '' : (cityHint || '')) + addr + ' ' + clean).trim();
+  }
+  return ((cityHint ? cityHint + ' ' : '') + clean).trim();
+}
+
 function guessRegion(text) {
   const t = String(text || '').replace(/臺/g, '台');
   return REGION_NAMES.find(r => t.includes(r)) || '';

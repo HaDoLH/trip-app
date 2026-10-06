@@ -10,7 +10,7 @@ const TYPE_NAMES = { food: '餐廳', cafe: '咖啡 / 飲料', sight: '景點', s
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
 // 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
-const APP_VERSION = 'v17';
+const APP_VERSION = 'v18';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)
@@ -898,7 +898,10 @@ function openStopForm(opts) {
     <div class="field"><label>名稱</label><input type="text" id="sName" value="${esc(s.name)}" placeholder="店名或景點名稱">
       ${(mode === 'pending' && s._nameUnsure) ? lookupLinks(s, index) : ''}</div>
     <div class="field"><label>備註</label><textarea id="sNote" placeholder="地址、營業時間、注意事項…">${esc(s.note)}</textarea></div>
-    <div class="field"><label>Google Maps 搜尋詞</label><input type="text" id="sMap" value="${esc(s.mapQuery)}" placeholder="地址 + 店名，找得最準"></div>
+    <div class="field"><label>Google Maps 搜尋詞</label>
+      <input type="text" id="sMap" value="${esc(s.mapQuery)}" placeholder="地址 + 店名，找得最準">
+      <button type="button" class="link-btn" id="sMapSync">↻ 用上面的名稱重算</button>
+      <p class="note">改了名稱就按一下，地址會留著、名字換成新的（「辦理入住」這類字不會帶進去）</p></div>
     <div class="field"><label>分享連結</label>
       <input type="url" id="sLink" value="${esc(s.link || '')}" placeholder="貼上 IG / Threads 貼文連結" inputmode="url" autocapitalize="off">
       <p class="note">別人分享的貼文網址貼這裡，行程上就能直接點開</p></div>
@@ -918,6 +921,14 @@ function openStopForm(opts) {
   `, root => {
     root.querySelector('[data-close]').onclick = closeSheet;
 
+    const cityHint = guessCity(trip ? trip.name : '');
+    root.querySelector('#sMapSync').onclick = () => {
+      const box = root.querySelector('#sMap');
+      box.value = buildMapQuery(root.querySelector('#sName').value,
+                                root.querySelector('#sNote').value, box.value, cityHint);
+      toast('搜尋詞已重算');
+    };
+
     root.querySelector('#sSave').onclick = () => {
       const name = root.querySelector('#sName').value.trim();
       if (!name) { toast('請輸入名稱'); return; }
@@ -933,6 +944,12 @@ function openStopForm(opts) {
       };
       const doneBox = root.querySelector('#sDone');
       if (doneBox) data.done = doneBox.checked;
+
+      /* 改了名稱但沒手動改搜尋詞的話，把搜尋詞裡的舊店名換成新的。
+         不這樣做的話，搜尋詞會一直留著當初解析出來的舊名字。 */
+      if (name !== s.name && data.mapQuery === s.mapQuery && s.name && data.mapQuery.includes(s.name)) {
+        data.mapQuery = data.mapQuery.replace(s.name, nameForMap(name)).replace(/\s{2,}/g, ' ').trim();
+      }
 
       if (mode === 'pending') {
         // 只改確認卡上的那一筆，還沒寫進行程；你親手改過，就不再標「待確認」

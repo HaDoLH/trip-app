@@ -623,3 +623,10 @@ body{
   font-family:ui-monospace,"SFMono-Regular",Menlo,monospace; letter-spacing:.02em;
 }
 #syncCodeShow{color:var(--ink-2); background:var(--surface-2)}
+
+/* 表單裡的文字按鈕（例如「用名稱重算」） */
+.link-btn{
+  border:none; background:transparent; color:var(--link); font:inherit; font-size:11.5px;
+  padding:6px 0 0; cursor:pointer; text-align:left;
+}
+.link-btn:hover{text-decoration:underline}
