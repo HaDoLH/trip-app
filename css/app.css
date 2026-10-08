@@ -630,3 +630,31 @@ body{
   padding:6px 0 0; cursor:pointer; text-align:left;
 }
 .link-btn:hover{text-decoration:underline}
+
+/* ===========================================================
+   排序模式：整列變成可以拖的大方塊
+   手機上握把只有 22px 寬，手指很難按準，按歪就變成「選取文字」。
+   =========================================================== */
+.stops.sorting{background:var(--ground); padding:4px 0 8px}
+.stops.sorting .stop{
+  margin:7px 10px; border:1px solid var(--line); border-radius:var(--r-sm);
+  background:var(--surface); box-shadow:0 1px 2px rgba(0,0,0,.06);
+  /* 整塊都能拖：關掉捲動接管、關掉長按選字與 iOS 的放大鏡選單 */
+  touch-action:none; cursor:grab;
+  user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;
+  padding:4px 0;
+}
+.stops.sorting .stop:active{cursor:grabbing}
+.stops.sorting .stop::before{border-radius:var(--r-sm) 0 0 var(--r-sm)}
+/* 排序時把細節收起來，一眼看得到順序就好 */
+.stops.sorting .stop-note,
+.stops.sorting .stop-links,
+.stops.sorting .stop-edit,
+.stops.sorting .stop-check{display:none}
+.stops.sorting .stop-grip{flex:0 0 38px; font-size:17px; color:var(--ink-2)}
+.stops.sorting .stop-name{margin-bottom:0}
+.stops.sorting .stop-time{padding-top:11px}
+.stops.sorting .stop.dragging{box-shadow:var(--shadow); transform:scale(1.02)}
+.sort-bar{position:sticky; top:0; z-index:2}
+/* 平常的握把也要擋掉長按選單，不然按住會跳出「拷貝／查詢」 */
+.stop-grip{-webkit-touch-callout:none; user-select:none; -webkit-user-select:none}

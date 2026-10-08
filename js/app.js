@@ -10,7 +10,7 @@ const TYPE_NAMES = { food: '餐廳', cafe: '咖啡 / 飲料', sight: '景點', s
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
 // 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
-const APP_VERSION = 'v18';
+const APP_VERSION = 'v19';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)
@@ -44,7 +44,20 @@ function linkLabel(u) {
    一段長文改成條列，資訊量沒變但眼睛找得到東西。      */
 function noteLines(note) {
   return String(note || '').split('｜').map(t => t.trim()).filter(Boolean)
-    .map(t => `<span>${esc(t)}</span>`).join('');
+    .map(t => `<span>${linkify(t)}</span>`).join('');
+}
+
+/* 備註裡常常夾著網址（預購表單、點餐連結）。
+   先跳脫成安全的 HTML，再把網址換成可以點的連結 ——
+   順序不能反過來，不然會把使用者打的字當成標籤解析。 */
+const RE_NOTE_URL = /(https?:\/\/[^\s，,、；;）)｜|]+|(?:www\.|forms\.gle\/|lin\.ee\/|reurl\.cc\/)[^\s，,、；;）)｜|]+)/g;
+function linkify(text) {
+  return esc(text).replace(RE_NOTE_URL, m => {
+    const tail = (m.match(/[.。,，、;；)）]+$/) || [''])[0];   // 句尾標點不算網址的一部分
+    const url = m.slice(0, m.length - tail.length);
+    const href = /^https?:\/\//i.test(url) ? url : 'https://' + url;
+    return `<a href="${href}" target="_blank" rel="noopener">${url}</a>${tail}`;
+  });
 }
 
 /* 目前畫面的狀態（跟資料無關，重整就歸零） */
@@ -55,6 +68,7 @@ const view = {
   chat: [],            // 新增分頁的對話訊息
   pending: null,       // 等待確認的解析結果
   shots: [],           // 暫存的截圖網址（重整就消失，不會存進硬碟）
+  sortMode: false,     // 排序模式：整列變成可以拖的大方塊
   guideOS: null,       // 取字步驟目前顯示哪個系統
   lookupIndex: null,   // 按了「查店名」的是確認卡上第幾筆，回來時要幫它開編輯視窗
   lookupAt: 0,         // 按下的時間，用來分辨「真的離開又回來」
@@ -143,6 +157,7 @@ function renderPlan() {
   // 舊資料裡「11:40台中出發 12:17到台南」這種，一鍵拆成出發＋抵達兩筆
   const splittable = splittableStops(day);
 
+  const sorting = view.sortMode;
   const stopsHtml = day.stops.length
     ? day.stops.map(stop => renderStop(stop, c)).join('')
     : `<li class="empty">這天還沒有安排。<br>到下面的 <strong>＋ 新增</strong> 分頁貼一段文字，<br>或按「手動新增一筆」。</li>`;
@@ -159,9 +174,15 @@ function renderPlan() {
         <span>有 ${splittable.length} 筆交通寫成一整句，可以拆成「出發」「抵達」兩筆，時間軸才排得對。</span>
         <button id="btnSplitTransit">✂ 拆開</button>
       </div>` : ''}
-    <ul class="stops" id="stopList">${stopsHtml}</ul>
+    ${sorting ? `
+      <div class="hint-bar sort-bar">
+        <span>整列按住就能拖。放開後順序立刻存檔。</span>
+        <button id="btnSortDone">完成</button>
+      </div>` : ''}
+    <ul class="stops ${sorting ? 'sorting' : ''}" id="stopList">${stopsHtml}</ul>
     <div class="day-foot">
       <button class="ghost-btn" id="btnAddStop">＋ 手動新增一筆</button>
+      <button class="ghost-btn" id="btnSortMode">⠿ 調整順序</button>
       <button class="ghost-btn" id="btnSortTime">⇅ 依時間排序</button>
       <button class="ghost-btn" id="btnEditDay">✎ 這天的標題</button>
       <button class="ghost-btn" id="btnAddDay">＋ 加一天</button>
@@ -227,9 +248,12 @@ function initDrag(list, dayId) {
   const clearMarks = () => rows.forEach(r => r.classList.remove('drag-over', 'drag-over-end'));
 
   list.addEventListener('pointerdown', e => {
-    const grip = e.target.closest('.stop-grip');
+    // 平常只有握把能拖；排序模式下整列都能拖（手機上握把太小不好按）
+    const grip = view.sortMode
+      ? (e.target.closest('a, button') ? null : e.target.closest('.stop'))
+      : e.target.closest('.stop-grip');
     if (!grip) return;
-    dragging = grip.closest('.stop');
+    dragging = grip.closest('.stop') || grip;
     rows = Array.from(list.querySelectorAll('.stop'));
     startIdx = rows.indexOf(dragging);
     dropIdx = startIdx;
@@ -1363,6 +1387,12 @@ $('#dayView').addEventListener('click', e => {
     const on = toggleDone(trip.id, day.id, doneBtn.getAttribute('data-done'));
     renderPlan();
     toast(on ? '打勾了 ✓' : '取消打勾，之後會出現在口袋清單');
+    return;
+  }
+  if (e.target.closest('#btnSortMode') || e.target.closest('#btnSortDone')) {
+    view.sortMode = !view.sortMode;
+    renderPlan();
+    if (view.sortMode) toast('整列按住就可以拖');
     return;
   }
   if (e.target.closest('#btnSplitTransit')) {

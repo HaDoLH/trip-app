@@ -128,6 +128,32 @@ function normalizeTime(raw) {
    標好之後，要判斷哪裡是「下一家」就容易多了。
    ============================================================ */
 
+/**
+ * 這段「數字-數字」真的是營業時間嗎？
+ * 「$400-600」裡面夾著「00-60」、「2026.09.01-11.01」裡面夾著「01-11」，
+ * 長得跟時段一模一樣，但一個是價錢、一個是日期。判斷兩件事：
+ *   ① 前後有沒有黏著別的數字或小數點（有的話就是從一串數字裡切出來的）
+ *   ② 數字本身合不合理（沒有 43 點，也沒有 60 分）
+ */
+function looksLikeHours(text, start, end) {
+  const prev = text.slice(Math.max(0, start - 1), start);
+  const next = text.slice(end, end + 1);
+  if (/[\d.\/$＄]/.test(prev)) return false;
+  if (/\d/.test(next)) return false;
+
+  for (const part of text.slice(start, end).split(/[–\-~～至到]/)) {
+    const t = part.trim();
+    if (!t) return false;
+    if (t.includes(':')) {
+      const [h, m] = t.split(':').map(Number);
+      if (h > 24 || m > 59) return false;
+    } else if (Number(t) > 24) {
+      return false;                 // 43-20 這種不是時間
+    }
+  }
+  return true;
+}
+
 /** 找地址：先用嚴格版（要有門牌號），找不到再用寬鬆版 */
 function findAddress(text) {
   return text.match(RE_ADDRESS) || text.match(RE_ADDRESS_LOOSE);
@@ -446,7 +472,8 @@ function parseEntry(raw, cityHint = '') {
       const start = m.index, end = m.index + m[0].length;
       const hits = sp => start < sp.end && end > sp.start;
       // 已經被別的規則抓過、或落在日期區間裡的就跳過（例如「週一公休」的「公休」）
-      if (!spans.some(hits) && !blocked.some(hits)) spans.push({ start, end, text: m[0].trim() });
+      const ok = re !== RE_HOURS_RANGE || looksLikeHours(work, start, end);
+      if (ok && !spans.some(hits) && !blocked.some(hits)) spans.push({ start, end, text: m[0].trim() });
       if (m[0].length === 0) re.lastIndex++;
     }
   });
