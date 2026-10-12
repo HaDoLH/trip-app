@@ -10,7 +10,7 @@ const TYPE_NAMES = { food: '餐廳', cafe: '咖啡 / 飲料', sight: '景點', s
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
 // 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
-const APP_VERSION = 'v19';
+const APP_VERSION = 'v20';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)
@@ -152,7 +152,7 @@ function renderPlan() {
 
   const idx = trip.days.indexOf(day);
   const c = dayColor(trip.color, idx);
-  const routeUrl = buildRouteUrl(day);
+  const segs = routeSegments(day);
 
   // 舊資料裡「11:40台中出發 12:17到台南」這種，一鍵拆成出發＋抵達兩筆
   const splittable = splittableStops(day);
@@ -167,7 +167,9 @@ function renderPlan() {
       <span class="day-badge">Day ${idx + 1}</span>
       <span class="day-title">${esc(day.title || '（尚未命名）')}</span>
       <span class="day-date">${esc(formatDateLabel(day.date))}</span>
-      ${routeUrl ? `<button class="day-route" id="btnRoute">🗺 看今日路線</button>` : ''}
+      ${segs.length === 1 ? `<button class="day-route" data-route="0">🗺 看今日路線</button>` : ''}
+      ${segs.length > 1 ? segs.map((sg, i) =>
+          `<button class="day-route" data-route="${i}">🗺 路線 ${i + 1}／${segs.length}</button>`).join('') : ''}
     </div>
     ${splittable.length ? `
       <div class="hint-bar">
@@ -220,17 +222,38 @@ function renderStop(stop, color) {
     </li>`;
 }
 
-/**
- * 把當天的景點串成 Google Maps 多點路線。
- * 備案、沒有地圖搜尋詞的都跳過（那些不是實際會走的點）。
- */
-function buildRouteUrl(day) {
-  const pts = day.stops.filter(s => s.mapQuery && !s.alt).map(s => s.mapQuery);
-  if (pts.length < 2) return '';
-  const origin = pts[0];
-  const destination = pts[pts.length - 1];
-  // Google 的中途點上限是 9 個，超過只取前面 9 個
-  const waypoints = pts.slice(1, -1).slice(0, 9);
+/* ---------- 今日路線 ----------
+   Google 地圖一條路線最多只吃 11 個點（起點＋9 個中途＋終點），
+   超過的會被默默丟掉 —— 這就是「路線漏掉很多」的原因。
+   所以超過就切成好幾段，段與段共用一個點，接起來才是完整的一條路。
+
+   交通類（高鐵站、火車站）不放進去：那是搭車不是導航，
+   而且「台中高鐵站」會把整張地圖拉到兩百公里外。 */
+const ROUTE_MAX = 11;
+
+function routePoints(day) {
+  return day.stops
+    .filter(s => s.mapQuery && !s.alt && s.type !== 'transit')
+    .map(s => s.mapQuery);
+}
+
+/** 切成好幾段，每段最多 11 個點 */
+function routeSegments(day) {
+  const pts = routePoints(day);
+  if (pts.length < 2) return [];
+  const segs = [];
+  for (let i = 0; i < pts.length - 1; i += ROUTE_MAX - 1) {
+    const seg = pts.slice(i, i + ROUTE_MAX);
+    if (seg.length >= 2) segs.push(seg);
+  }
+  return segs;
+}
+
+function buildRouteUrl(points) {
+  if (!points || points.length < 2) return '';
+  const origin = points[0];
+  const destination = points[points.length - 1];
+  const waypoints = points.slice(1, -1);
   let url = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}`;
   if (waypoints.length) url += `&waypoints=${waypoints.map(encodeURIComponent).join('|')}`;
   url += '&travelmode=driving';
@@ -243,51 +266,94 @@ function buildRouteUrl(day) {
    這樣手機上「捲動頁面」和「拖曳排序」不會打架 —— 這是最容易踩的坑。 */
 function initDrag(list, dayId) {
   if (!list) return;
-  let dragging = null, rows = [], startIdx = -1, dropIdx = -1;
+  let dragging = null, rows = [], rects = [], startIdx = -1, dropIdx = -1;
+  let startY = 0, gapH = 0, scroller = null, autoTimer = null;
 
-  const clearMarks = () => rows.forEach(r => r.classList.remove('drag-over', 'drag-over-end'));
+  /** 把所有列的位移清掉 */
+  const resetRows = () => rows.forEach(r => { r.style.transform = ''; r.classList.remove('shifted'); });
+
+  /** 依照「要插在第 idx 個位置」把其他列推開，空出一個洞 */
+  const openGap = idx => {
+    rows.forEach((r, i) => {
+      if (i === startIdx) return;
+      let dy = 0;
+      if (i > startIdx && i < idx) dy = -gapH;        // 往上補位
+      else if (i < startIdx && i >= idx) dy = gapH;   // 往下讓位
+      r.style.transform = dy ? `translateY(${dy}px)` : '';
+      r.classList.toggle('shifted', !!dy);
+    });
+  };
+
+  /** 拖到清單上下緣時自動捲動，不然長清單根本拖不到底 */
+  const autoScroll = y => {
+    clearInterval(autoTimer);
+    if (!scroller) return;
+    const box = scroller.getBoundingClientRect();
+    const edge = 70;
+    const speed = y < box.top + edge ? -12 : (y > box.bottom - edge ? 12 : 0);
+    if (!speed) return;
+    autoTimer = setInterval(() => { scroller.scrollTop += speed; }, 16);
+  };
 
   list.addEventListener('pointerdown', e => {
     // 平常只有握把能拖；排序模式下整列都能拖（手機上握把太小不好按）
-    const grip = view.sortMode
+    const handle = view.sortMode
       ? (e.target.closest('a, button') ? null : e.target.closest('.stop'))
       : e.target.closest('.stop-grip');
-    if (!grip) return;
-    dragging = grip.closest('.stop') || grip;
+    if (!handle) return;
+
+    dragging = handle.closest('.stop') || handle;
     rows = Array.from(list.querySelectorAll('.stop'));
+    rects = rows.map(r => r.getBoundingClientRect());
     startIdx = rows.indexOf(dragging);
     dropIdx = startIdx;
+    startY = e.clientY;
+    // 讓出來的空隙＝這張卡的高度（含列與列之間的間距）
+    gapH = rects[startIdx].height + (rects[1] && rects[0] ? Math.max(0, rects[1].top - rects[0].bottom) : 0);
+    scroller = list.closest('.screen');
+
     dragging.classList.add('dragging');
-    grip.setPointerCapture(e.pointerId);
+    document.body.classList.add('dragging-now');
+    handle.setPointerCapture(e.pointerId);
+    if (navigator.vibrate) navigator.vibrate(12);   // 手機上「抓起來了」的回饋（iOS 沒有，不影響）
     e.preventDefault();
   });
 
   list.addEventListener('pointermove', e => {
     if (!dragging) return;
     e.preventDefault();
-    // 看游標目前落在哪兩列之間
+
+    // 卡片跟著手指走 —— 這是「有在拖」最直接的感覺
+    dragging.style.transform = `translateY(${e.clientY - startY}px) scale(1.03)`;
+
+    // 用卡片目前的中心點，判斷會插在第幾個位置
+    const mid = rects[startIdx].top + rects[startIdx].height / 2 + (e.clientY - startY);
     let idx = rows.length;
     for (let i = 0; i < rows.length; i++) {
-      const r = rows[i].getBoundingClientRect();
-      if (e.clientY < r.top + r.height / 2) { idx = i; break; }
+      if (mid < rects[i].top + rects[i].height / 2) { idx = i; break; }
     }
-    if (idx === dropIdx) return;
-    dropIdx = idx;
-    clearMarks();
-    if (idx < rows.length) rows[idx].classList.add('drag-over');
-    else rows[rows.length - 1].classList.add('drag-over-end');
+    if (idx !== dropIdx) {
+      dropIdx = idx;
+      openGap(idx);
+      if (navigator.vibrate) navigator.vibrate(8);   // 每換一格震一下
+    }
+    autoScroll(e.clientY);
   });
 
   const finish = () => {
     if (!dragging) return;
+    clearInterval(autoTimer);
+    dragging.style.transform = '';
     dragging.classList.remove('dragging');
-    clearMarks();
+    document.body.classList.remove('dragging-now');
+    resetRows();
     // 往下搬的時候，因為自己會先被抽走，目標位置要往前一格
     const to = dropIdx > startIdx ? dropIdx - 1 : dropIdx;
     dragging = null;
     if (to !== startIdx && to >= 0) {
       moveStop(view.tripId, dayId, startIdx, to);
       renderPlan();
+      toast('順序已更新');
     }
   };
   list.addEventListener('pointerup', finish);
@@ -1434,11 +1500,13 @@ $('#dayView').addEventListener('click', e => {
     toast('已刪除這天');
     return;
   }
-  if (e.target.closest('#btnRoute')) {
-    const url = buildRouteUrl(day);
-    const pts = day.stops.filter(s => s.mapQuery && !s.alt).length;
-    if (pts > 11) toast('Google 最多支援 11 個點，這次只帶前面幾個');
-    window.open(url, '_blank', 'noopener');
+  const routeBtn = e.target.closest('[data-route]');
+  if (routeBtn) {
+    const segs = routeSegments(day);
+    const seg = segs[+routeBtn.getAttribute('data-route')];
+    if (!seg) return;
+    if (segs.length > 1) toast(`這段 ${seg.length} 個點（Google 一次最多 11 個）`);
+    window.open(buildRouteUrl(seg), '_blank', 'noopener');
   }
 });
 

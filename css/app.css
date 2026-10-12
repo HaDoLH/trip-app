@@ -202,10 +202,20 @@ body{
 .stop.alt-stop{background:var(--surface-2)}
 /* 左側色條：用形狀而不是外框，表示「這是一筆行程」 */
 .stop::before{content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--c)}
-.stop.dragging{opacity:.45; box-shadow:var(--shadow); z-index:5}
-/* 拖曳時顯示「會插在這裡」的那條線 */
-.stop.drag-over{box-shadow:inset 0 2px 0 var(--ok)}
-.stop.drag-over-end{box-shadow:inset 0 -2px 0 var(--ok)}
+/* 拖曳中的那張卡：跟著手指走、浮起來、微微放大，一眼看得出「我正抓著它」 */
+.stop.dragging{
+  z-index:20; position:relative; opacity:.96;
+  box-shadow:0 12px 28px rgba(0,0,0,.28), 0 2px 6px rgba(0,0,0,.18);
+  background:var(--surface);
+  transition:none;                 /* 跟手指同步，不能有延遲 */
+  cursor:grabbing;
+}
+/* 其他列讓位時要滑順，才看得出「空位在這裡」 */
+.stop{transition:transform .16s cubic-bezier(.2,.8,.3,1)}
+.stop.shifted{z-index:1}
+/* 拖曳期間整頁不准選字（手指滑過其他列也會被選起來） */
+body.dragging-now{user-select:none; -webkit-user-select:none}
+body.dragging-now *{cursor:grabbing !important}
 .stop-grip{
   flex:0 0 22px; display:grid; place-items:center; color:var(--ink-3);
   cursor:grab; font-size:13px; user-select:none; touch-action:none;
