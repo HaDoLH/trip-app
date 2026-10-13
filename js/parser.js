@@ -653,6 +653,26 @@ function buildMapQuery(name, note, oldQuery, cityHint) {
   return ((cityHint ? cityHint + ' ' : '') + clean).trim();
 }
 
+/**
+ * 把抓到的地址整理成「看得懂又短」的樣子：
+ * 去掉郵遞區號、去掉這趟旅程的縣市（整天都在台南，每列都印只是佔位置），
+ * 以及地址前面黏著的店名括號（「文學館(臺南市中西區…」）。
+ */
+function cleanAddress(text, cityHint) {
+  const found = findAddress(String(text || ''));
+  if (!found) return '';
+  let a = found[1].replace(/\s+/g, '');
+  // 地址前面黏著店名的話（「文學館(臺南市中西區…」），從括號後面才是地址
+  const bracket = a.search(/[（(]/);
+  if (bracket >= 0 && !/\d/.test(a.slice(0, bracket))) a = a.slice(bracket + 1);
+  a = a.replace(/^\d{3,5}/, '');                    // 郵遞區號
+  if (cityHint) {
+    const c = cityHint.replace('台', '[台臺]');
+    a = a.replace(new RegExp('^' + c + '(市|縣)?'), '');
+  }
+  return a.trim();
+}
+
 function guessRegion(text) {
   const t = String(text || '').replace(/臺/g, '台');
   return REGION_NAMES.find(r => t.includes(r)) || '';

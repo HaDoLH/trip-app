@@ -12,7 +12,7 @@
    現在改成「先連網拿最新的，沒網路才用快取」，而且抓檔時明講不要用暫存。
    ============================================================ */
 
-const CACHE_NAME = 'trip-app-v23';
+const CACHE_NAME = 'trip-app-v24';
 
 // 要預先存起來的檔案。路徑一律用相對路徑（'./'），
 // 因為 GitHub Pages 是放在 /trip-app/ 子目錄下，寫成 '/' 開頭會找不到。
@@ -26,6 +26,7 @@ const ASSETS = [
   './js/photos.js',
   './js/store.js',
   './js/parser.js',
+  './js/zine.js',
   './js/app.js',
   './manifest.json',
   './icons/icon-192.png',

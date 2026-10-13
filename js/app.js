@@ -21,7 +21,7 @@ const TIME_QUICK = ['待定', '上午', '中午', '下午', '傍晚', '晚上'];
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
 // 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
-const APP_VERSION = 'v23';
+const APP_VERSION = 'v24';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)
@@ -32,14 +32,9 @@ const esc = s => String(s == null ? '' : s)
    這裡把地址挑出來，而且把這趟旅程的縣市拿掉 —— 整天都在台南，
    每一列都印「台南市」只是佔位置，留「中西區永福路二段35巷6號」才看得出遠近。 */
 function shortAddress(stop) {
-  const found = findAddress(`${stop.mapQuery || ''}
-${stop.note || ''}`);
-  if (!found) return '';
-  let addr = found[1].replace(/\s+/g, '').replace(/^\d{3,5}/, '');   // 去掉郵遞區號
   const trip = currentTrip();
-  const city = trip ? guessCity(trip.name) : '';
-  if (city) addr = addr.replace(new RegExp('^(' + city + '|' + city.replace('台', '臺') + ')(市|縣)?'), '');
-  return addr;
+  return cleanAddress(`${stop.mapQuery || ''}
+${stop.note || ''}`, trip ? guessCity(trip.name) : '');
 }
 
 /* ---------- 行程照片 ----------
@@ -1276,6 +1271,15 @@ function openMenu() {
     <h3>跨裝置同步</h3>
     <div id="syncBox"></div>
 
+    <h3>匯出行程手冊</h3>
+    <p>把目前這一趟做成一份<strong>可以瀏覽、可以印成 PDF</strong> 的行程手冊。
+      它是一個獨立的檔案，傳給同行的人，對方不用安裝任何東西就打得開。</p>
+    <div class="sync-actions">
+      <button class="btn btn-secondary" id="btnZineView" style="flex:1">👀 預覽</button>
+      <button class="btn btn-secondary" id="btnZineSave">⬇ 下載</button>
+    </div>
+    <p class="note">開啟後右下角有「列印／存成 PDF」。手機上是分享 → 列印 → 兩指放大 → 存成 PDF。</p>
+
     <h3>備份你的資料</h3>
     <p>行程存在<strong>這台裝置的瀏覽器</strong>裡。清除瀏覽資料、換手機都會消失，記得定期匯出備份。</p>
     <button class="btn btn-secondary" id="btnExport" style="width:100%">⬇ 匯出備份檔</button>
@@ -1323,6 +1327,19 @@ function openMenu() {
     root.querySelector('[data-close]').onclick = closeSheet;
     bindPick(root, '#themePick', 'data-t', v => { setTheme(v); });
     renderSyncBox();
+
+    const zineTrip = () => currentTrip() || DB.trips[0];
+    root.querySelector('#btnZineView').onclick = () => {
+      const t = zineTrip();
+      if (!t) { toast('還沒有任何旅程'); return; }
+      if (!zinePreview(t)) toast('瀏覽器擋了新分頁，改用「下載」');
+    };
+    root.querySelector('#btnZineSave').onclick = () => {
+      const t = zineTrip();
+      if (!t) { toast('還沒有任何旅程'); return; }
+      zineDownload(t);
+      toast('已下載，雙擊就能打開');
+    };
 
     root.querySelector('#btnExport').onclick = () => {
       exportJSON();
