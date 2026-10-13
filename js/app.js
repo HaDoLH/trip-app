@@ -7,10 +7,21 @@
 const $ = sel => document.querySelector(sel);
 const TYPE_ICONS = { food: '🍽', cafe: '☕', snack: '🍰', sight: '📍', shop: '🛍', hotel: '🏠', transit: '🚉' };
 const TYPE_NAMES = { food: '餐廳', cafe: '咖啡 / 飲料', snack: '點心 / 甜點', sight: '景點', shop: '購物', hotel: '住宿', transit: '交通' };
+/** 時間欄只吃 HH:MM（9:30 要補成 09:30），其他寫法一律回傳空字串 */
+function clockValue(t) {
+  const m = String(t || '').match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return '';
+  const h = +m[1], mi = +m[2];
+  if (h > 23 || mi > 59) return '';
+  return String(h).padStart(2, '0') + ':' + m[2];
+}
+
+/* 不是每一筆都知道幾點，這些是常用的替代說法 */
+const TIME_QUICK = ['待定', '上午', '中午', '下午', '傍晚', '晚上'];
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
 // 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
-const APP_VERSION = 'v22';
+const APP_VERSION = 'v23';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)
@@ -35,12 +46,13 @@ ${stop.note || ''}`);
    照片本身存在 photos.js（IndexedDB ＋ 雲端），這裡只負責把它畫出來。
    先畫出空的框，再一張一張補上內容 —— 讀檔是非同步的，
    不先畫框的話畫面會先跳一下再長出來。 */
-function photoStrip(stop) {
+/* 行程表上只放一個徽章，不直接貼縮圖 ——
+   一天十幾筆，每筆都塞圖會把時間軸拉得又長又難掃。點徽章才看圖。 */
+function photoBadge(stop) {
   const ids = Array.isArray(stop.photos) ? stop.photos : [];
   if (!ids.length) return '';
-  return `<div class="shots-row">` +
-    ids.map(id => `<img class="shot-thumb" data-photo="${esc(id)}" alt="行程照片" loading="lazy">`).join('') +
-    `</div>`;
+  return `<button type="button" class="pill pill-photo" data-gallery="${esc(stop.id)}"
+            aria-label="看 ${ids.length} 張照片">📷 ${ids.length}</button>`;
 }
 
 /** 把畫面上所有空的照片框填上內容 */
@@ -81,6 +93,15 @@ function linkLabel(u) {
 function noteLines(note) {
   return String(note || '').split('｜').map(t => t.trim()).filter(Boolean)
     .map(t => `<span>${linkify(t)}</span>`).join('');
+}
+
+/* 備註存檔時是用全形直線「｜」串成一行，但編輯時一行一項好讀得多。
+   進出各轉一次，存進去的格式不變，匯出的備份也相容。 */
+function noteToLines(note) {
+  return String(note || '').split('｜').map(t => t.trim()).filter(Boolean).join('\n');
+}
+function linesToNote(text) {
+  return String(text || '').split('\n').map(t => t.trim()).filter(Boolean).join('｜');
 }
 
 /* 備註裡常常夾著網址（預購表單、點餐連結）。
@@ -228,7 +249,6 @@ function renderPlan() {
     </div>`;
 
   initDrag($('#stopList'), day.id);
-  hydratePhotos($('#dayView'));
 }
 
 function renderStop(stop, color) {
@@ -247,12 +267,12 @@ function renderStop(stop, color) {
         <div class="stop-name">
           <span>${TYPE_ICONS[stop.type] || '📍'}</span>
           <span class="txt">${esc(stop.name)}</span>
+          ${photoBadge(stop)}
           ${stop.booked ? '<span class="pill pill-booked">已訂位 ✅</span>' : ''}
           ${stop.alt ? '<span class="pill pill-alt">備案</span>' : ''}
         </div>
         ${addr ? `<div class="stop-addr">📍 ${esc(addr)}</div>` : ''}
         ${stop.note ? `<div class="stop-note">${noteLines(stop.note)}</div>` : ''}
-        ${photoStrip(stop)}
         <div class="stop-links">
           ${mapUrl ? `<a class="map-link" href="${mapUrl}" target="_blank" rel="noopener">🗺 Google Maps</a>` : ''}
           ${safeUrl(stop.link) ? `<a class="map-link" href="${esc(safeUrl(stop.link))}" target="_blank" rel="noopener">🔗 ${esc(linkLabel(stop.link))}</a>` : ''}
@@ -526,6 +546,33 @@ async function pasteAndParse() {
  * 在對話裡的圖被夾在可以捲動的區域中，手指一按常常變成「捲動」而不是「選字」。
  * 放到全螢幕、圖以原本寬度顯示，長按選字就穩定得多，也可以兩指放大看小字。
  */
+/** 看某一筆行程的所有照片 */
+async function openGallery(stopId) {
+  const day = currentDay();
+  const stop = day && day.stops.find(s => s.id === stopId);
+  const ids = stop && Array.isArray(stop.photos) ? stop.photos : [];
+  if (!ids.length) return;
+  closeViewer();
+  const v = document.createElement('div');
+  v.className = 'viewer';
+  v.innerHTML = `
+    <button class="viewer-close" aria-label="關閉">✕ 關閉</button>
+    <div class="viewer-scroll" id="galleryBox"></div>
+    <div class="viewer-tip">${esc(stop.name)}　${ids.length} 張</div>`;
+  v.querySelector('.viewer-close').onclick = closeViewer;
+  $('.app').appendChild(v);
+  const box = v.querySelector('#galleryBox');
+  for (const id of ids) {
+    const data = await photoLoad(id);
+    if (!data) continue;
+    const img = document.createElement('img');
+    img.src = data;
+    img.alt = '行程照片';
+    box.appendChild(img);
+  }
+  if (!box.children.length) box.innerHTML = '<p class="viewer-tip">照片還在同步中，等一下再看看</p>';
+}
+
 function openViewer(src) {
   closeViewer();
   const v = document.createElement('div');
@@ -1020,21 +1067,28 @@ function openStopForm(opts) {
       <div class="field"><label>取到的原文（對照用）</label>
         <div class="raw-box">${esc(s._raw)}</div></div>` : ''}
     <div class="row">
-      <div class="field"><label>時間</label><input type="text" id="sTime" value="${esc(s.time)}" placeholder="19:30 或 下午"></div>
+      <div class="field"><label>時間</label>
+        <input type="time" id="sTime" value="${clockValue(s.time)}" step="300">
+        <div class="time-quick" id="timeQuick">
+          ${TIME_QUICK.map(t => `<button type="button" data-tq="${t}"
+             aria-pressed="${s.time === t}">${t}</button>`).join('')}
+        </div></div>
       ${mode === 'db' ? `<div class="field"><label>哪一天</label><select id="sDay">
         ${trip.days.map((d, i) => `<option value="${d.id}" ${d.id === dayId ? 'selected' : ''}>Day ${i + 1}　${esc(formatDateLabel(d.date))}</option>`).join('')}
       </select></div>` : ''}
     </div>
     <div class="field"><label>名稱</label><input type="text" id="sName" value="${esc(s.name)}" placeholder="店名或景點名稱">
       ${(mode === 'pending' && s._nameUnsure) ? lookupLinks(s, index) : ''}</div>
-    <div class="field"><label>備註</label><textarea id="sNote" placeholder="地址、營業時間、注意事項…">${esc(s.note)}</textarea></div>
+    <div class="field"><label>備註</label>
+      <textarea id="sNote" class="tall" placeholder="一行一項：&#10;營業時間&#10;電話&#10;IG 帳號">${esc(noteToLines(s.note))}</textarea>
+      <p class="note">一行一項，存檔時會自動串好</p></div>
     <div class="field"><label>Google Maps 搜尋詞</label>
       <input type="text" id="sMap" value="${esc(s.mapQuery)}" placeholder="地址 + 店名，找得最準">
       <button type="button" class="link-btn" id="sMapSync">↻ 用上面的名稱重算</button>
       <p class="note">改了名稱就按一下，地址會留著、名字換成新的（「辦理入住」這類字不會帶進去）</p></div>
     <div class="field"><label>照片紀錄</label>
       <div class="photo-edit" id="sPhotos"></div>
-      <button type="button" class="link-btn" id="sPhotoAdd">＋ 加照片</button>
+      <button type="button" class="ghost-btn photo-add" id="sPhotoAdd">＋ 加照片</button>
       <input type="file" id="sPhotoFile" accept="image/*" multiple hidden>
       <p class="note">拍的照片會縮到長邊 1280 再存，開著同步的話其他裝置也看得到</p></div>
     <div class="field"><label>分享連結</label>
@@ -1098,6 +1152,23 @@ function openStopForm(opts) {
       if (img && img.src) openViewer(img.src);
     };
 
+    /* 時間有兩種來源：上面的時鐘，或下面的「下午／傍晚」。
+       選了一邊就把另一邊取消，避免兩個都亮著卻不知道以哪個為準。 */
+    let quickTime = TIME_QUICK.includes(s.time) ? s.time : '';
+    const timeBox = root.querySelector('#sTime');
+    const quickBox = root.querySelector('#timeQuick');
+    const paintQuick = () => quickBox.querySelectorAll('button').forEach(
+      b => b.setAttribute('aria-pressed', String(b.getAttribute('data-tq') === quickTime)));
+    quickBox.addEventListener('click', e => {
+      const b = e.target.closest('[data-tq]');
+      if (!b) return;
+      const v = b.getAttribute('data-tq');
+      quickTime = quickTime === v ? '' : v;      // 再按一次取消
+      if (quickTime) timeBox.value = '';
+      paintQuick();
+    });
+    timeBox.addEventListener('input', () => { if (timeBox.value) { quickTime = ''; paintQuick(); } });
+
     const cityHint = guessCity(trip ? trip.name : '');
     root.querySelector('#sMapSync').onclick = () => {
       const box = root.querySelector('#sMap');
@@ -1110,9 +1181,9 @@ function openStopForm(opts) {
       const name = root.querySelector('#sName').value.trim();
       if (!name) { toast('請輸入名稱'); return; }
       const data = {
-        time: root.querySelector('#sTime').value.trim() || '待定',
+        time: timeBox.value.trim() || quickTime || '待定',
         name,
-        note: root.querySelector('#sNote').value.trim(),
+        note: linesToNote(root.querySelector('#sNote').value),
         mapQuery: root.querySelector('#sMap').value.trim(),
         link: root.querySelector('#sLink').value.trim(),
         type: root.querySelector('#sType').value,
@@ -1564,8 +1635,8 @@ $('#dayView').addEventListener('click', e => {
     return;
   }
 
-  const thumb = e.target.closest('img[data-photo]');
-  if (thumb && thumb.src) { openViewer(thumb.src); return; }
+  const gal = e.target.closest('[data-gallery]');
+  if (gal) { openGallery(gal.getAttribute('data-gallery')); return; }
 
   const editStop = e.target.closest('[data-edit-stop]');
   if (editStop) {

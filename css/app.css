@@ -701,3 +701,24 @@ body.dragging-now *{cursor:grabbing !important}
   border:none; background:var(--danger); color:#fff; font-size:11px; line-height:1;
   cursor:pointer; display:grid; place-items:center; font-family:inherit;
 }
+
+/* 照片徽章（行程表上只顯示張數，點了才看圖） */
+.pill-photo{
+  background:var(--surface-2); color:var(--ink-2); border:1px solid var(--line);
+  font:inherit; font-size:10px; padding:1px 7px; border-radius:10px; cursor:pointer;
+}
+.pill-photo:hover{border-color:var(--ink-3); color:var(--ink)}
+/* 大圖頁一次攤開好幾張 */
+.viewer-scroll img + img{margin-top:10px}
+
+/* 編輯視窗的加照片按鈕 */
+.photo-add{margin-top:8px}
+
+/* 時間：上面是時鐘（手機會跳滑動選擇器），下面是常用時段 */
+#sTime{font-variant-numeric:tabular-nums}
+.time-quick{display:flex; flex-wrap:wrap; gap:5px; margin-top:7px}
+.time-quick button{
+  border:1px solid var(--line); background:var(--surface); color:var(--ink-2);
+  font:inherit; font-size:12px; padding:5px 11px; border-radius:999px; cursor:pointer;
+}
+.time-quick button[aria-pressed="true"]{background:var(--ink); color:var(--surface); border-color:var(--ink)}
