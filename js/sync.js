@@ -92,7 +92,8 @@ async function syncConnect(rawCode) {
     const app = initializeApp(window.FIREBASE_CONFIG);
     const db = fs.getFirestore(app);
     // 路徑 trips/<代碼>/items/<旅程id>，跟行事曆的 families/ 完全分開
-    sync.api = { fs, col: fs.collection(db, 'trips', code, 'items') };
+    // db 也存起來：照片是另一個 collection，需要用到它
+    sync.api = { fs, db, col: fs.collection(db, 'trips', code, 'items') };
 
     sync.unsub = fs.onSnapshot(
       sync.api.col,

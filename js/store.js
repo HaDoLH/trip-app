@@ -398,6 +398,11 @@ function toggleDone(tripId, dayId, stopId) {
 function deleteStop(tripId, dayId, stopId) {
   const day = getDay(getTrip(tripId), dayId);
   if (!day) return false;
+  // 照片存在別的地方，刪行程時要順手清掉，不然會變成撿不回來的孤兒
+  const gone = day.stops.find(s => s.id === stopId);
+  if (gone && Array.isArray(gone.photos) && typeof photoDelete === 'function') {
+    gone.photos.forEach(id => photoDelete(id));
+  }
   day.stops = day.stops.filter(s => s.id !== stopId);
   saveDB();
   return true;

@@ -10,11 +10,47 @@ const TYPE_NAMES = { food: '餐廳', cafe: '咖啡 / 飲料', sight: '景點', s
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
 // 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
-const APP_VERSION = 'v20';
+const APP_VERSION = 'v21';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)
   .replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/* ---------- 地址 ----------
+   搜尋詞是「地址＋店名」，但排順序時真正要看的只有地址。
+   這裡把地址挑出來，而且把這趟旅程的縣市拿掉 —— 整天都在台南，
+   每一列都印「台南市」只是佔位置，留「中西區永福路二段35巷6號」才看得出遠近。 */
+function shortAddress(stop) {
+  const found = findAddress(`${stop.mapQuery || ''}
+${stop.note || ''}`);
+  if (!found) return '';
+  let addr = found[1].replace(/\s+/g, '').replace(/^\d{3,5}/, '');   // 去掉郵遞區號
+  const trip = currentTrip();
+  const city = trip ? guessCity(trip.name) : '';
+  if (city) addr = addr.replace(new RegExp('^(' + city + '|' + city.replace('台', '臺') + ')(市|縣)?'), '');
+  return addr;
+}
+
+/* ---------- 行程照片 ----------
+   照片本身存在 photos.js（IndexedDB ＋ 雲端），這裡只負責把它畫出來。
+   先畫出空的框，再一張一張補上內容 —— 讀檔是非同步的，
+   不先畫框的話畫面會先跳一下再長出來。 */
+function photoStrip(stop) {
+  const ids = Array.isArray(stop.photos) ? stop.photos : [];
+  if (!ids.length) return '';
+  return `<div class="shots-row">` +
+    ids.map(id => `<img class="shot-thumb" data-photo="${esc(id)}" alt="行程照片" loading="lazy">`).join('') +
+    `</div>`;
+}
+
+/** 把畫面上所有空的照片框填上內容 */
+function hydratePhotos(root) {
+  (root || document).querySelectorAll('img[data-photo]:not([src])').forEach(async img => {
+    const data = await photoLoad(img.getAttribute('data-photo'));
+    if (data) img.src = data;
+    else img.classList.add('shot-missing');     // 雲端也沒有（別台還沒上傳完）
+  });
+}
 
 /* ---------- 分享連結 ----------
    只放行 http / https。不檢查的話，貼上 javascript: 開頭的網址會變成可執行的程式碼。 */
@@ -192,9 +228,11 @@ function renderPlan() {
     </div>`;
 
   initDrag($('#stopList'), day.id);
+  hydratePhotos($('#dayView'));
 }
 
 function renderStop(stop, color) {
+  const addr = shortAddress(stop);
   const mapUrl = stop.mapQuery
     ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stop.mapQuery)}`
     : '';
@@ -212,7 +250,9 @@ function renderStop(stop, color) {
           ${stop.booked ? '<span class="pill pill-booked">已訂位 ✅</span>' : ''}
           ${stop.alt ? '<span class="pill pill-alt">備案</span>' : ''}
         </div>
+        ${addr ? `<div class="stop-addr">📍 ${esc(addr)}</div>` : ''}
         ${stop.note ? `<div class="stop-note">${noteLines(stop.note)}</div>` : ''}
+        ${photoStrip(stop)}
         <div class="stop-links">
           ${mapUrl ? `<a class="map-link" href="${mapUrl}" target="_blank" rel="noopener">🗺 Google Maps</a>` : ''}
           ${safeUrl(stop.link) ? `<a class="map-link" href="${esc(safeUrl(stop.link))}" target="_blank" rel="noopener">🔗 ${esc(linkLabel(stop.link))}</a>` : ''}
@@ -992,6 +1032,11 @@ function openStopForm(opts) {
       <input type="text" id="sMap" value="${esc(s.mapQuery)}" placeholder="地址 + 店名，找得最準">
       <button type="button" class="link-btn" id="sMapSync">↻ 用上面的名稱重算</button>
       <p class="note">改了名稱就按一下，地址會留著、名字換成新的（「辦理入住」這類字不會帶進去）</p></div>
+    <div class="field"><label>照片紀錄</label>
+      <div class="photo-edit" id="sPhotos"></div>
+      <button type="button" class="link-btn" id="sPhotoAdd">＋ 加照片</button>
+      <input type="file" id="sPhotoFile" accept="image/*" multiple hidden>
+      <p class="note">拍的照片會縮到長邊 1280 再存，開著同步的話其他裝置也看得到</p></div>
     <div class="field"><label>分享連結</label>
       <input type="url" id="sLink" value="${esc(s.link || '')}" placeholder="貼上 IG / Threads 貼文連結" inputmode="url" autocapitalize="off">
       <p class="note">別人分享的貼文網址貼這裡，行程上就能直接點開</p></div>
@@ -1010,6 +1055,48 @@ function openStopForm(opts) {
     </div>
   `, root => {
     root.querySelector('[data-close]').onclick = closeSheet;
+
+    /* 照片在這個視窗裡是「馬上生效」的（存進 IndexedDB 和雲端），
+       不像其他欄位要按儲存。所以用一份暫存清單，取消時也不會回朔 ——
+       照片是紀錄，誤刪比誤留麻煩得多。 */
+    let photoIds = Array.isArray(s.photos) ? s.photos.slice() : [];
+
+    const drawPhotos = () => {
+      const box = root.querySelector('#sPhotos');
+      box.innerHTML = photoIds.map(id =>
+        `<span class="photo-cell"><img data-photo="${esc(id)}" alt="照片">
+           <button type="button" class="photo-del" data-del="${esc(id)}" aria-label="刪除這張">✕</button></span>`
+      ).join('') || '<span class="note">還沒有照片</span>';
+      hydratePhotos(box);
+    };
+    drawPhotos();
+
+    root.querySelector('#sPhotoAdd').onclick = () => root.querySelector('#sPhotoFile').click();
+    root.querySelector('#sPhotoFile').onchange = async e => {
+      const files = Array.from(e.target.files || []);
+      e.target.value = '';                       // 清掉才能連續選同一張
+      for (const f of files) {
+        try {
+          const { id } = await photoSave(f);
+          photoIds.push(id);
+          drawPhotos();
+        } catch (err) { toast(err.message || '這張圖存不起來'); }
+      }
+      if (files.length) toast(`已加入 ${files.length} 張`);
+    };
+    root.querySelector('#sPhotos').onclick = e => {
+      const del = e.target.closest('[data-del]');
+      if (del) {
+        const id = del.getAttribute('data-del');
+        if (!confirm('刪掉這張照片？')) return;
+        photoIds = photoIds.filter(x => x !== id);
+        photoDelete(id);
+        drawPhotos();
+        return;
+      }
+      const img = e.target.closest('img[data-photo]');
+      if (img && img.src) openViewer(img.src);
+    };
 
     const cityHint = guessCity(trip ? trip.name : '');
     root.querySelector('#sMapSync').onclick = () => {
@@ -1032,6 +1119,7 @@ function openStopForm(opts) {
         booked: root.querySelector('#sBooked').checked,
         alt: root.querySelector('#sAlt').checked
       };
+      data.photos = photoIds;
       const doneBox = root.querySelector('#sDone');
       if (doneBox) data.done = doneBox.checked;
 
@@ -1475,6 +1563,9 @@ $('#dayView').addEventListener('click', e => {
     toast('已依時間排好');
     return;
   }
+
+  const thumb = e.target.closest('img[data-photo]');
+  if (thumb && thumb.src) { openViewer(thumb.src); return; }
 
   const editStop = e.target.closest('[data-edit-stop]');
   if (editStop) {
