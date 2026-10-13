@@ -5,12 +5,12 @@
    ============================================================ */
 
 const $ = sel => document.querySelector(sel);
-const TYPE_ICONS = { food: '🍽', cafe: '☕', sight: '📍', shop: '🛍', hotel: '🏠', transit: '🚉' };
-const TYPE_NAMES = { food: '餐廳', cafe: '咖啡 / 飲料', sight: '景點', shop: '購物', hotel: '住宿', transit: '交通' };
+const TYPE_ICONS = { food: '🍽', cafe: '☕', snack: '🍰', sight: '📍', shop: '🛍', hotel: '🏠', transit: '🚉' };
+const TYPE_NAMES = { food: '餐廳', cafe: '咖啡 / 飲料', snack: '點心 / 甜點', sight: '景點', shop: '購物', hotel: '住宿', transit: '交通' };
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
 // 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
-const APP_VERSION = 'v21';
+const APP_VERSION = 'v22';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)

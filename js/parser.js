@@ -90,18 +90,28 @@ const RE_UI_LINE = /^(?:追蹤|追蹤中|已追蹤|發送訊息|訊息|聯絡|�
 const TYPE_RULES = [
   { type: 'hotel',   words: ['旅館', '飯店', '民宿', '旅店', 'hotel', 'hostel', 'inn', '住宿', 'check-in', 'check in', '青旅'] },
   { type: 'transit', words: ['高鐵', '台鐵', '火車站', '車站', '機場', '客運', '轉運', '碼頭', '租車', '搭車', 'uber', '捷運', '巴士'] },
-  { type: 'cafe',    words: ['咖啡', '珈琲', 'cafe', 'café', 'coffee', 'kopitiam', '喫茶', 'kissa', '茶', '飲', '甜點', '烘焙', 'bakery', '麵包', '可可', '巧克力', '冰', '果汁', 'bar', '酒'] },
+  { type: 'snack',   words: ['甜點', '點心', '蛋糕', '烘焙', 'bakery', 'patisserie', 'dessert', '麵包', '吐司', '可頌', '貝果', '布丁', '鬆餅', '可麗餅', '泡芙', '餅乾', '銅鑼燒', '巧克力', '可可', '冰淇淋', '霜淇淋', '刨冰', '豆花', '仙草', '湯圓', '麻糬', '雞蛋糕', '紅豆餅', '冰'] },
+  { type: 'cafe',    words: ['咖啡', '珈琲', 'cafe', 'café', 'coffee', 'kopitiam', '喫茶', 'kissa', '茶', '飲', '果汁', 'bar', '酒'] },
   { type: 'food',    words: ['食堂', '壽司', '串燒', '燒肉', '拉麵', '麵', '飯', '餐廳', '料理', '小吃', '早午餐', 'brunch', '鍋', '定食', '牛排', '火鍋', '餃', '粥', '湯', '便當', '滷', '炸', '烤', '海產', '快炒', '居酒屋'] },
   { type: 'shop',    words: ['選物', '雜貨', '書店', '扭蛋', '盲盒', '一番賞', '商店', 'shop', 'store', '市集', '藥妝', '百貨', '文具', '古著', '二手', '唱片', '香水', '紀念品', '伴手禮'] },
   { type: 'sight',   words: ['美術館', '博物館', '展', '公園', '古蹟', '寺', '宮', '廟', '教堂', '老街', '夜市', '市場', '步道', '山', '海', '燈塔', '園區', '巷', '街', '景點', '神社', '城'] }
 ];
 
-function guessType(name, fullText) {
-  const target = (name + ' ' + fullText).toLowerCase();
+function matchType(text) {
+  const target = String(text || '').toLowerCase();
   for (const rule of TYPE_RULES) {
     if (rule.words.some(w => target.includes(w.toLowerCase()))) return rule.type;
   }
-  return 'sight';   // 猜不出來就當景點，最不容易誤導
+  return '';
+}
+
+/**
+ * 先只看店名，看不出來才連備註一起看。
+ * 店名比周圍的字可靠得多 ——「稻滿珈琲」的備註寫著「甜點售完」，
+ * 兩段混在一起判斷就會被判成點心店，但它其實是咖啡店。
+ */
+function guessType(name, fullText) {
+  return matchType(name) || matchType(name + ' ' + fullText) || 'sight';
 }
 
 /* ---------- 時間正規化 ----------
