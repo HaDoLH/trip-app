@@ -463,6 +463,56 @@ function collectPocket(includeActive) {
   return allStops().filter(r => !r.stop.done && !r.stop.pocketHide && (includeActive || r.over));
 }
 
+/* ---------- 旅程盤點 ----------
+   旅程結束後盤點一次：哪些去成了、哪些沒有。
+   沒去成的不會被搬走（原紀錄保持完整），但會自動出現在口袋清單，
+   依縣市分好，下次規劃時從那裡撈回來。 */
+
+/** 這趟結束了，而且還沒盤點過嗎？ */
+function needsWrap(trip) {
+  if (!trip || trip.wrappedAt) return false;
+  return tripIsOver(trip) && trip.days.some(d => d.stops.length);
+}
+
+/** 盤點時要逐筆勾的（交通類不算 —— 車一定搭到了，不用勾） */
+function wrapCandidates(trip) {
+  const out = [];
+  (trip ? trip.days : []).forEach((day, dayIdx) => {
+    const stops = day.stops.filter(s => s.type !== 'transit');
+    if (stops.length) out.push({ day, dayIdx, stops });
+  });
+  return out;
+}
+
+/**
+ * 完成盤點。doneIds 是「有去成」的那些；其餘標成沒去成。
+ * 交通類一律當作去過。回傳統計，給結算畫面用。
+ */
+function wrapTrip(tripId, doneIds) {
+  const trip = getTrip(tripId);
+  if (!trip) return null;
+  const picked = new Set(doneIds || []);
+  let done = 0, undone = 0;
+  const byRegion = {};
+
+  trip.days.forEach(day => {
+    day.stops.forEach(stop => {
+      const ok = stop.type === 'transit' || picked.has(stop.id);
+      stop.done = ok;
+      if (ok) stop.pocketHide = false;
+      if (stop.type === 'transit') return;        // 交通不計入統計
+      if (ok) { done++; return; }
+      undone++;
+      const r = stopRegion(stop, trip);
+      byRegion[r] = (byRegion[r] || 0) + 1;
+    });
+  });
+
+  trip.wrappedAt = Date.now();
+  saveDB();
+  return { done, undone, byRegion };
+}
+
 /** 搜尋比對：店名、備註、地址、旅程名稱都找。臺／台 視為同一個字 */
 function matchStop(row, keyword) {
   const k = String(keyword || '').trim().toLowerCase().replace(/臺/g, '台');

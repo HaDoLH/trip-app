@@ -21,7 +21,7 @@ const TIME_QUICK = ['待定', '上午', '中午', '下午', '傍晚', '晚上'];
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
 // 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
-const APP_VERSION = 'v24';
+const APP_VERSION = 'v25';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)
@@ -167,7 +167,16 @@ function renderTrips() {
       </div>`;
   }).join('');
 
-  box.innerHTML = (trips.length ? cards : `
+  // 有旅程結束了還沒盤點 → 最上面放一條提示
+  const pending = trips.filter(needsWrap);
+  const banner = pending.length ? `
+    <div class="hint-bar wrap-bar">
+      <span>「${esc(pending[0].name)}」已經結束了 —— 來盤點哪些去成了${
+        pending.length > 1 ? `（還有 ${pending.length - 1} 趟）` : ''}。</span>
+      <button data-wrap="${pending[0].id}">開始盤點</button>
+    </div>` : '';
+
+  box.innerHTML = banner + (trips.length ? cards : `
     <div class="empty">
       還沒有任何旅程。<br>
       按下面的 <strong>＋ 新增一趟旅程</strong> 開始規劃吧。
@@ -236,6 +245,7 @@ function renderPlan() {
     <ul class="stops ${sorting ? 'sorting' : ''}" id="stopList">${stopsHtml}</ul>
     <div class="day-foot">
       <button class="ghost-btn" id="btnAddStop">＋ 手動新增一筆</button>
+      <button class="ghost-btn" id="btnWrap">✓ 盤點這趟</button>
       <button class="ghost-btn" id="btnSortMode">⠿ 調整順序</button>
       <button class="ghost-btn" id="btnSortTime">⇅ 依時間排序</button>
       <button class="ghost-btn" id="btnEditDay">✎ 這天的標題</button>
@@ -1063,14 +1073,17 @@ function openStopForm(opts) {
         <div class="raw-box">${esc(s._raw)}</div></div>` : ''}
     <div class="row">
       <div class="field"><label>時間</label>
-        <input type="time" id="sTime" value="${clockValue(s.time)}" step="300">
-        <div class="time-quick" id="timeQuick">
-          ${TIME_QUICK.map(t => `<button type="button" data-tq="${t}"
-             aria-pressed="${s.time === t}">${t}</button>`).join('')}
-        </div></div>
+        <input type="time" id="sTime" value="${clockValue(s.time)}" step="300"></div>
       ${mode === 'db' ? `<div class="field"><label>哪一天</label><select id="sDay">
         ${trip.days.map((d, i) => `<option value="${d.id}" ${d.id === dayId ? 'selected' : ''}>Day ${i + 1}　${esc(formatDateLabel(d.date))}</option>`).join('')}
       </select></div>` : ''}
+    </div>
+    <div class="field time-quick-field">
+      <div class="time-quick" id="timeQuick">
+        ${TIME_QUICK.map(t => `<button type="button" data-tq="${t}"
+           aria-pressed="${s.time === t}">${t}</button>`).join('')}
+      </div>
+      <p class="note">不知道確切時間就選一個時段</p>
     </div>
     <div class="field"><label>名稱</label><input type="text" id="sName" value="${esc(s.name)}" placeholder="店名或景點名稱">
       ${(mode === 'pending' && s._nameUnsure) ? lookupLinks(s, index) : ''}</div>
@@ -1553,6 +1566,121 @@ sync.onRemote = () => {
 };
 
 /* ============================================================
+   四之三、旅程盤點
+
+   旅程結束後走一次：一次勾完哪些去成了，
+   沒去成的就自動留在口袋清單裡（依縣市分好）等下次撈。
+   ============================================================ */
+
+function openWrapSheet(tripId) {
+  const trip = getTrip(tripId);
+  if (!trip) return;
+  const groups = wrapCandidates(trip);
+  const total = groups.reduce((n, g) => n + g.stops.length, 0);
+  const transit = trip.days.reduce((n, d) => n + d.stops.filter(s => s.type === 'transit').length, 0);
+
+  if (!total) { toast('這趟沒有可以盤點的行程'); return; }
+
+  // 一份暫存的勾選狀態，按「完成盤點」才真的寫進去
+  const picked = new Set();
+  groups.forEach(g => g.stops.forEach(s => { if (s.done) picked.add(s.id); }));
+
+  openSheet(`
+    <h2>盤點「${esc(trip.name)}」</h2>
+    <p>哪些真的去成了？勾起來的算去過，<strong>沒勾的會留在口袋清單</strong>，下次規劃時撈得回來。</p>
+    <div class="wrap-count" id="wrapCount"></div>
+    <div class="wrap-list" id="wrapList">
+      ${groups.map(g => `
+        <section class="wrap-day">
+          <header>
+            <h4>Day ${g.dayIdx + 1}　${esc(formatDateLabel(g.day.date))}</h4>
+            <button type="button" class="link-btn" data-allday="${g.dayIdx}">這天全勾</button>
+          </header>
+          ${g.stops.map(st => `
+            <label class="wrap-row">
+              <input type="checkbox" data-pick="${esc(st.id)}" ${st.done ? 'checked' : ''}>
+              <span class="wrap-name">${TYPE_ICONS[st.type] || '📍'} ${esc(st.name)}</span>
+              <span class="wrap-time">${esc(st.time || '')}</span>
+            </label>`).join('')}
+        </section>`).join('')}
+    </div>
+    ${transit ? `<p class="note">交通 ${transit} 筆（高鐵、車站）已自動算成去過，不用勾。</p>` : ''}
+    <div class="sheet-actions">
+      <button class="btn btn-secondary" data-close>取消</button>
+      <button class="btn btn-primary" id="wrapGo">完成盤點</button>
+    </div>
+  `, root => {
+    const paint = () => {
+      root.querySelector('#wrapCount').innerHTML =
+        `<span class="ok">去了 ${picked.size}</span><span class="no">沒去成 ${total - picked.size}</span>`;
+      groups.forEach(g => {
+        const all = g.stops.every(st => picked.has(st.id));
+        const btn = root.querySelector(`[data-allday="${g.dayIdx}"]`);
+        if (btn) btn.textContent = all ? '這天全不勾' : '這天全勾';
+      });
+    };
+    paint();
+
+    root.querySelector('#wrapList').addEventListener('change', e => {
+      const box = e.target.closest('[data-pick]');
+      if (!box) return;
+      const id = box.getAttribute('data-pick');
+      if (box.checked) picked.add(id); else picked.delete(id);
+      paint();
+    });
+
+    root.querySelector('#wrapList').addEventListener('click', e => {
+      const btn = e.target.closest('[data-allday]');
+      if (!btn) return;
+      e.preventDefault();
+      const g = groups[+btn.getAttribute('data-allday')];
+      const all = g.stops.every(st => picked.has(st.id));
+      g.stops.forEach(st => { if (all) picked.delete(st.id); else picked.add(st.id); });
+      root.querySelectorAll('[data-pick]').forEach(b => { b.checked = picked.has(b.getAttribute('data-pick')); });
+      paint();
+    });
+
+    root.querySelector('[data-close]').onclick = closeSheet;
+    root.querySelector('#wrapGo').onclick = () => {
+      const res = wrapTrip(trip.id, [...picked]);
+      renderTrips(); renderPlan();
+      showWrapResult(trip, res);
+    };
+  });
+}
+
+/** 盤點完的結算畫面：沒去成的依縣市列出來 */
+function showWrapResult(trip, res) {
+  const regions = Object.keys(res.byRegion).sort((a, b) => res.byRegion[b] - res.byRegion[a]);
+  openSheet(`
+    <h2>盤點完成</h2>
+    <div class="wrap-count big">
+      <span class="ok">去了 ${res.done}</span><span class="no">沒去成 ${res.undone}</span>
+    </div>
+    ${res.undone ? `
+      <p>這 ${res.undone} 家已經收進<strong>口袋清單</strong>，依縣市分好了：</p>
+      <div class="wrap-regions">
+        ${regions.map(r => `<span class="rg-chip">${esc(r)} <b>${res.byRegion[r]}</b></span>`).join('')}
+      </div>
+      <p class="note">它們還留在「${esc(trip.name)}」的紀錄裡（以後查得到、匯出的手冊也不會缺），
+        只是同時出現在口袋清單。下次規劃時按 ＋ 就能排進新旅程。</p>`
+      : '<p>全部都去到了，漂亮。🎉</p>'}
+    <div class="sheet-actions">
+      <button class="btn btn-secondary" data-close>關閉</button>
+      ${res.undone ? '<button class="btn btn-primary" id="wrapToPocket">看口袋清單</button>' : ''}
+    </div>
+  `, root => {
+    root.querySelector('[data-close]').onclick = closeSheet;
+    const go2 = root.querySelector('#wrapToPocket');
+    if (go2) go2.onclick = () => {
+      closeSheet();
+      view.find = { mode: 'pocket', q: '', region: '全部', includeActive: false };
+      go('find');
+    };
+  });
+}
+
+/* ============================================================
    五、畫面切換
    ============================================================ */
 function go(screen) {
@@ -1603,6 +1731,8 @@ $('#tripList').addEventListener('click', e => {
   const edit = e.target.closest('[data-edit]');
   if (edit) { openTripForm(edit.getAttribute('data-edit')); return; }
   if (open) { openTrip(open.getAttribute('data-open')); return; }
+  const wrap = e.target.closest('[data-wrap]');
+  if (wrap) { openWrapSheet(wrap.getAttribute('data-wrap')); return; }
   if (e.target.closest('#btnNewTrip')) openTripForm(null);
 });
 $('#tripList').addEventListener('keydown', e => {
@@ -1631,6 +1761,7 @@ $('#dayView').addEventListener('click', e => {
     toast(on ? '打勾了 ✓' : '取消打勾，之後會出現在口袋清單');
     return;
   }
+  if (e.target.closest('#btnWrap')) { openWrapSheet(trip.id); return; }
   if (e.target.closest('#btnSortMode') || e.target.closest('#btnSortDone')) {
     view.sortMode = !view.sortMode;
     renderPlan();

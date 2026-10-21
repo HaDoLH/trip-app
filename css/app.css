@@ -466,8 +466,11 @@ body.dragging-now *{cursor:grabbing !important}
 .field input:focus, .field textarea:focus, .field select:focus{border-color:var(--ok)}
 .field textarea{min-height:88px; resize:vertical; line-height:1.6}
 .field textarea.tall{min-height:150px; font-family:ui-monospace,"SFMono-Regular",Menlo,monospace; font-size:16px}
-.row{display:flex; gap:10px}
-.row .field{flex:1; min-width:0}
+/* 兩欄並排，但寬度不夠就自動上下排 ——
+   iOS 的 input[type=time] 要顯示「下午2:14」，半欄塞不下會把隔壁擠開 */
+.row{display:flex; gap:10px; flex-wrap:wrap}
+.row .field{flex:1 1 150px; min-width:0}
+.field input[type="time"]{min-width:0}
 .check-row{display:flex; gap:16px; flex-wrap:wrap}
 .check{display:flex; align-items:center; gap:6px; font-size:14px; cursor:pointer; color:var(--ink)}
 .check input{width:auto; accent-color:var(--ok)}
@@ -722,3 +725,42 @@ body.dragging-now *{cursor:grabbing !important}
   font:inherit; font-size:12px; padding:5px 11px; border-radius:999px; cursor:pointer;
 }
 .time-quick button[aria-pressed="true"]{background:var(--ink); color:var(--surface); border-color:var(--ink)}
+
+/* ===========================================================
+   旅程盤點
+   =========================================================== */
+.wrap-bar{border-radius:var(--r-md); margin:0 0 4px}
+.wrap-count{
+  display:flex; gap:10px; margin:4px 0 12px; font-size:12.5px; font-weight:600;
+  position:sticky; top:0; background:var(--surface); padding:6px 0; z-index:2;
+}
+.wrap-count span{padding:4px 12px; border-radius:999px}
+.wrap-count .ok{background:var(--ok-soft); color:var(--ok)}
+.wrap-count .no{background:var(--warn-soft); color:var(--warn)}
+.wrap-count.big{font-size:15px; position:static}
+.wrap-count.big span{padding:8px 18px}
+
+.wrap-list{max-height:46vh; overflow-y:auto; overscroll-behavior:contain; margin-bottom:6px}
+.wrap-day{margin-bottom:14px}
+.wrap-day header{display:flex; align-items:baseline; justify-content:space-between; gap:10px}
+.wrap-day h4{margin:0 0 4px; font-size:11.5px; letter-spacing:.08em; color:var(--ink-3); font-weight:700}
+/* 勾選列給大一點，手機上才好按 */
+.wrap-row{
+  display:flex; align-items:center; gap:10px; padding:9px 4px;
+  border-top:1px solid var(--line); cursor:pointer;
+}
+.wrap-row input{width:20px; height:20px; flex:0 0 auto; accent-color:var(--ok); margin:0}
+.wrap-name{flex:1; min-width:0; font-size:13.5px; word-break:break-word}
+.wrap-time{font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums; flex:0 0 auto}
+/* 勾起來的變淡，一眼看得出剩下哪些沒處理 */
+.wrap-row:has(input:checked) .wrap-name{color:var(--ink-3); text-decoration:line-through}
+
+.wrap-regions{display:flex; flex-wrap:wrap; gap:7px; margin:10px 0 4px}
+.rg-chip{
+  border:1px solid var(--line); background:var(--surface-2); color:var(--ink-2);
+  font-size:12.5px; padding:5px 13px; border-radius:999px;
+}
+.rg-chip b{color:var(--ink); margin-left:2px}
+
+/* 時段按鈕那一區不需要標籤，上緣收一點 */
+.time-quick-field .time-quick{margin-top:0}
