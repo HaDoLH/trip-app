@@ -21,7 +21,7 @@ const TIME_QUICK = ['待定', '上午', '中午', '下午', '傍晚', '晚上'];
 const TRIP_EMOJIS = ['✈️', '🏮', '🗼', '🏝', '⛰', '🍜', '🎡', '🚅', '🌸', '🏖', '🗿', '🏛', '🚗', '🎪', '🍁', '❄️'];
 const TRIP_COLORS = ['#C05020', '#D48A17', '#1D9E75', '#2E7D82', '#3A5F8F', '#6B5490', '#B5647A', '#6E6A60'];
 // 版本號：跟 sw.js 的 CACHE_NAME 一起改，設定頁看得到，方便確認手機有沒有更新到
-const APP_VERSION = 'v25';
+const APP_VERSION = 'v26';
 
 /** 把使用者輸入的字變成安全的 HTML（避免店名裡的 < > 把版面弄壞） */
 const esc = s => String(s == null ? '' : s)
@@ -787,6 +787,17 @@ function findRows() {
   return base.filter(r => matchStop(r, f.q) && (f.region === '全部' || r.region === f.region));
 }
 
+/** 第二行要寫什麼
+ *  口袋清單：只留店家自己的資訊（地址），因為那是「以後要去哪」在看的。
+ *  全部行程：留旅程名稱和第幾天，因為那是「我把它排在哪」在找的。 */
+function findMeta(r, mode) {
+  if (mode === 'pocket') {
+    const addr = cleanAddress(`${r.stop.mapQuery || ''}\n${r.stop.note || ''}`, guessCity(r.trip.name));
+    return addr ? `<span class="fi-meta">📍 ${esc(addr)}</span>` : '';
+  }
+  return `<span class="fi-meta">${esc(r.trip.emoji || '')} ${esc(r.trip.name)}　Day ${r.dayIdx + 1}　${esc(formatDateLabel(r.day.date))}</span>`;
+}
+
 function renderFind() {
   const f = view.find;
   // 地區按鈕要從「還沒套地區篩選」的清單算，否則按下去之後其他地區就消失了
@@ -829,7 +840,7 @@ function renderFind() {
             <span class="fi-name">${TYPE_ICONS[r.stop.type] || '📍'} ${esc(r.stop.name)}
               ${r.stop.done ? '<span class="pill pill-booked">已完成</span>' : ''}
               ${r.stop.booked ? '<span class="pill pill-booked">已訂位</span>' : ''}</span>
-            <span class="fi-meta">${esc(r.trip.emoji || '')} ${esc(r.trip.name)}　Day ${r.dayIdx + 1}　${esc(formatDateLabel(r.day.date))}</span>
+            ${findMeta(r, f.mode)}
             ${r.stop.note ? `<span class="fi-note">${esc(r.stop.note)}</span>` : ''}
           </button>
           <button class="fi-add" data-pocket="${r.trip.id}|${r.day.id}|${r.stop.id}"
